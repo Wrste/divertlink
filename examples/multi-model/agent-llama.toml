@@ -1,0 +1,21 @@
+# 家庭机器 B：只跑 Llama（vLLM，:8001），对应网关 [[tunnels]] id = "llama"。
+
+[agent]
+id = "llama"
+server = "gateway.example.com:443"
+token = "agt_llama_REPLACE_ME_0123456789abcdef"
+heartbeat = "5s"
+heartbeat_timeout = "15s"
+max_inflight = 64
+protocols = ["openai", "vllm"]
+
+[tls]
+ca = "certs/ca.crt"
+
+[target]
+url = "http://127.0.0.1:8001"
+request_timeout = "10m"
+
+[log]
+level = "info"
+format = "text"

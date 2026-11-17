@@ -15,19 +15,67 @@ use crate::metrics::Metrics;
 use crate::upstream::HttpClient;
 use crate::util::Backoff;
 
+/// One local upstream reachable through this agent.
+#[derive(Debug)]
+pub struct TargetRoute {
+    /// Name used in logs/status (`default` for the `[target]` fallback).
+    pub name: String,
+    /// Normalized path prefix (stripped before forwarding); `None` for the fallback.
+    pub prefix: Option<String>,
+    /// Parsed base URI.
+    pub uri: axum::http::Uri,
+    /// Pooled HTTP client for this upstream.
+    pub client: HttpClient,
+    /// Response-header timeout.
+    pub request_timeout: Duration,
+    /// Static headers for this upstream.
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
 /// Immutable state shared by every session of one agent process.
 #[derive(Debug)]
 pub struct AgentState {
     /// Effective configuration.
     pub config: Arc<AgentConfig>,
-    /// Parsed local target base URI.
-    pub target_uri: axum::http::Uri,
-    /// Pooled HTTP client for the local model server.
-    pub target_client: HttpClient,
+    /// Fallback upstream (`[target]`).
+    pub default_route: TargetRoute,
+    /// Prefix-routed upstreams (`[[targets]]`), longest prefix first.
+    pub routes: Vec<TargetRoute>,
     /// Metrics (connection counters).
     pub metrics: Arc<Metrics>,
-    /// Bound on concurrent requests towards the local model server.
+    /// Bound on concurrent requests towards the local model servers.
     pub inflight: Arc<tokio::sync::Semaphore>,
+}
+
+impl AgentState {
+    /// Resolve an incoming request path to `(route, forwarded_path)`.
+    ///
+    /// The longest matching prefix wins; prefixes must match on a segment
+    /// boundary (`/qwen` matches `/qwen` and `/qwen/v1/...`, not `/qwenlite`).
+    pub fn route_for(&self, path: &str) -> (&TargetRoute, String) {
+        for route in &self.routes {
+            let Some(prefix) = &route.prefix else {
+                continue;
+            };
+            if path == prefix {
+                return (route, "/".to_string());
+            }
+            if let Some(rest) = path.strip_prefix(prefix.as_str()) {
+                if rest.starts_with('/') {
+                    return (route, rest.to_string());
+                }
+            }
+        }
+        (&self.default_route, path.to_string())
+    }
+
+    /// All upstreams in display order (prefix routes first, then fallback).
+    pub fn all_routes(&self) -> Vec<&TargetRoute> {
+        self.routes
+            .iter()
+            .chain(std::iter::once(&self.default_route))
+            .collect()
+    }
 }
 
 /// A running agent.
@@ -72,11 +120,54 @@ pub fn build_state(config: AgentConfig) -> Result<Arc<AgentState>> {
     }
     crate::tls::install_default_provider();
     let (_, _, _) = config.agent.server_parts()?;
-    let target_uri = config.target_uri()?;
-    let target_client = crate::upstream::build_http_client(
-        config.target.tls_ca.as_deref(),
-        config.target.connect_timeout,
-    )?;
+    let default_route = TargetRoute {
+        name: "default".to_string(),
+        prefix: None,
+        uri: config.target_uri()?,
+        client: crate::upstream::build_http_client(
+            config.target.tls_ca.as_deref(),
+            config.target.connect_timeout,
+        )?,
+        request_timeout: config.target.request_timeout,
+        headers: config.target.headers.clone(),
+    };
+    let mut routes = Vec::with_capacity(config.targets.len());
+    for target in config.targets.iter().filter(|t| t.enabled) {
+        let uri: axum::http::Uri = target
+            .url
+            .parse()
+            .map_err(|e| Error::Config(format!("target `{}`: invalid url: {e}", target.name)))?;
+        let client = crate::upstream::build_http_client(
+            target.tls_ca.as_deref(),
+            target
+                .connect_timeout
+                .unwrap_or(config.target.connect_timeout),
+        )?;
+        routes.push(TargetRoute {
+            name: target.name.clone(),
+            prefix: Some(crate::config::normalize_prefix(&target.prefix)?),
+            uri,
+            client,
+            request_timeout: target
+                .request_timeout
+                .unwrap_or(config.target.request_timeout),
+            headers: target.headers.clone(),
+        });
+    }
+    // Longest prefix first so nested prefixes resolve deterministically.
+    routes.sort_by(|a, b| {
+        b.prefix
+            .as_deref()
+            .unwrap_or("")
+            .len()
+            .cmp(&a.prefix.as_deref().unwrap_or("").len())
+    });
+    if !routes.is_empty() {
+        info!(
+            targets = routes.len(),
+            "agent serves multiple local upstreams (path-prefix routing)"
+        );
+    }
     let metrics = Arc::new(Metrics::new());
     let config = Arc::new(config);
     Ok(Arc::new(AgentState {
@@ -84,8 +175,8 @@ pub fn build_state(config: AgentConfig) -> Result<Arc<AgentState>> {
             config.agent.max_inflight.max(1),
         )),
         config: config.clone(),
-        target_uri,
-        target_client,
+        default_route,
+        routes,
         metrics,
     }))
 }

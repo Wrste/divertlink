@@ -44,6 +44,9 @@
   yamux 数据流，流内是标准 HTTP/1.1 报文（`Connection: close`）。天然的端到端背压、双向流式。
 - **控制流**：agent 建立连接后打开第一条 yamux 流作为控制流，发送 `hello`（含 tunnel id、token、
   协议能力），服务端回 `hello_ack` 并开始心跳。
+- **多对一**：一个网关可挂多条隧道（每模型/每机器一条，独立 mount/并发/鉴权）；一个 agent
+  可用 `[[targets]]` 前缀路由代理多个本地上游；同一隧道允许多个 agent 会话并存（round-robin +
+  流级故障转移）。详见 `docs/multi-model.md`。
 - **路由**：网关按 `mount` 前缀 / `host` / `default` 将请求分配给隧道；`static_routes` 走本地反代
   （例如反代到 new-api）。协议透明，所以 `/v1/...`、`/anthropic/...`（Anthropic SDK 的 base_url 自动拼接
   `/v1/messages`）都可用。
@@ -127,6 +130,9 @@ docs/                   # 用户文档
   握手/心跳在控制流上独立进行。首条入站流之外，网关拒绝 agent 再开新流。
 - 数据流：gateway 打开 yamux 流，发送一条 HTTP/1.1 请求（`Connection: close`），agent 以
   HTTP/1.1 server 方式响应；响应体按 chunk 透传（SSE 不缓冲）。流关闭即请求取消。
+- 会话池：同一隧道可同时存在多个 `ActiveSession`（多个 agent）。`open_stream` 以原子游标
+  round-robin 选择会话；打开失败则取消该会话（agent 已不可达）并尝试下一个，实现故障转移。
+  同名 session id 的重复注册视为同一 agent 重连，替换并取消旧会话。
 - 心跳模式（`heartbeat_mode`）：`app`（控制流 ping/pong，默认）、`transport`（TCP keepalive）、
   `both`、`none`。超时 = 连续 `heartbeat_timeout` 未收到任何控制流消息/流数据。
 
@@ -170,7 +176,7 @@ max_concurrent = 0                    # 0 = 不限
 
 [[tunnels]]                           # 静态注册的隧道（与 agent 配置对应）
 id = "home"
-token = "agt_change_me"
+token = "agt_change_me"               # 多个 agent 可用同一 id+token 接入同一隧道（会话池）
 mount = "/home"                       # 入口前缀；默认剥离后再转发
 hosts = []                            # 可选 Host 路由（如 home.llm.example.com）
 default = false                       # 无匹配时的兜底隧道（只能一个）
@@ -215,11 +221,20 @@ client_key = ""                       # 可选：mTLS 客户端私钥（与 clie
 insecure = false                      # 仅调试，强烈不建议
 
 [target]
-url = "http://127.0.0.1:8000"         # vLLM/Ollama/LM Studio/new-api
+url = "http://127.0.0.1:8000"         # vLLM/Ollama/LM Studio/new-api（默认上游）
 request_timeout = "10m"
 connect_timeout = "5s"
 tls_ca = ""                           # target 为 https 时的额外 CA
 headers = {}                          # 附加到上游请求的静态头
+
+# 可选：同一 agent 代理多个本地上游（路径前缀路由，最长前缀优先并剥离前缀）
+# [[targets]]
+# name = "qwen"
+# prefix = "/qwen"
+# url = "http://127.0.0.1:8001"
+# request_timeout = "10m"             # 可选，继承 [target]
+# headers = { "x-upstream" = "qwen" } # 仅发往该上游
+# enabled = true
 
 [log]
 level = "info"
@@ -266,8 +281,9 @@ verify_peer_pin(peer_certs, pin) -> Result<()>;
 
 // registry
 Registry::new(&ServerConfig, Arc<Metrics>) -> Arc<Registry>;
-TunnelEntry::open_stream(&self) -> Result<(yamux::Stream, OwnedSemaphorePermit)>;
-Registry::install_session(&self, tunnel_id, Arc<ActiveSession>) -> Result<()>;
+TunnelEntry::open_stream(&self) -> Result<(yamux::Stream, OwnedSemaphorePermit)>; // 会话池 round-robin + 故障转移
+TunnelEntry::sessions(&self) -> Vec<Arc<ActiveSession>>;
+Registry::install_session(&self, tunnel_id, Arc<ActiveSession>) -> Result<Option<Arc<ActiveSession>>>;
 Registry::remove_session(&self, tunnel_id, session_id);
 Registry::resolve(&self, req: &http::Request<()>, client_ip) -> Result<ResolvedRoute>;
 Registry::status_json(&self) -> serde_json::Value;
@@ -299,7 +315,7 @@ agent::build_state(AgentConfig) -> Result<Arc<AgentState>>;
   11. 管理端点 /healthz /metrics。
 - 发布物：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`、release 构建；
   CI 多平台（linux musl x86_64/aarch64、macOS、Windows）；Docker 多阶段静态镜像；systemd 单元。
-- 当前实现状态：127 个测试全部通过（93 单元 + 10 CLI 集成 + 3 控制台集成 + 21 端到端），clippy `-D warnings` 干净，
+- 当前实现状态：132 个测试全部通过（96 单元 + 10 CLI 集成 + 3 控制台集成 + 23 端到端），clippy `-D warnings` 干净，
   rustdoc `-D warnings` 干净；端到端覆盖还包括 mTLS、SPKI pin 匹配/不匹配、错误 token 拒绝、
   请求体超限、SSE 增量性断言、HTTP/2 入口、静态路由鉴权开关、纯明文部署。
 - 冒烟脚本 `scripts/smoke.sh`（15 项断言，含内置控制台 UI/API 自检）与 `make check`（fmt/clippy/test/doc/部署资产自检）均已验证通过。
@@ -335,5 +351,8 @@ agent::build_state(AgentConfig) -> Result<Arc<AgentState>>;
 
 ## 9. 非目标（MVP 不做）
 
-动态隧道注册/管理 Web UI、ACM E 自动签证书、多 agent 负载均衡同一隧道、QUIC/WebSocket 传输
+动态隧道注册/管理 Web UI（配置静态加载；控制台只做进程/配置管理）、ACME 自动签证书、
+按请求体 `model` 字段的协议层路由（交给 new-api/LiteLLM）、QUIC/WebSocket 传输
 （后续版本以 feature 形式加入）、跨网关联邦。文档中列明扩展点。
+
+> 多 agent 负载均衡/故障转移同一隧道已实现（会话池 round-robin），不属于非目标。

@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use axum::http::header;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
@@ -1079,6 +1080,42 @@ impl Default for TargetSettings {
     }
 }
 
+/// An additional local model server behind the same agent (many models -> one
+/// gateway). Requests are routed by path prefix and the prefix is stripped.
+///
+/// ```toml
+/// [[targets]]
+/// name = "qwen"
+/// prefix = "/qwen"
+/// url = "http://127.0.0.1:8001"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentTarget {
+    /// Human readable name (used in logs/status).
+    pub name: String,
+    /// Path prefix inside the tunnel, e.g. `/qwen`; must start with `/` and is
+    /// stripped before forwarding. Cannot be `/`.
+    pub prefix: String,
+    /// Base URL of this local model server.
+    pub url: String,
+    /// Per-target response-header timeout (defaults to `[target].request_timeout`).
+    #[serde(default, with = "humantime_serde::option")]
+    pub request_timeout: Option<Duration>,
+    /// Per-target connect timeout (defaults to `[target].connect_timeout`).
+    #[serde(default, with = "humantime_serde::option")]
+    pub connect_timeout: Option<Duration>,
+    /// Extra CA bundle when this target uses HTTPS with a private CA.
+    #[serde(default)]
+    pub tls_ca: Option<PathBuf>,
+    /// Static headers added to requests for this target only.
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    /// Disable this target without deleting it.
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+}
+
 /// The complete agent configuration (`agent.toml`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -1087,8 +1124,11 @@ pub struct AgentConfig {
     pub agent: AgentSettings,
     /// TLS trust.
     pub tls: AgentTlsSettings,
-    /// Local model server.
+    /// Default local model server (also the fallback when no `[[targets]]` prefix matches).
     pub target: TargetSettings,
+    /// Additional local model servers served by the same agent, routed by path prefix.
+    #[serde(default)]
+    pub targets: Vec<AgentTarget>,
     /// Logging.
     pub log: LogSettings,
 }
@@ -1100,6 +1140,7 @@ impl Default for AgentConfig {
             agent: AgentSettings::default(),
             tls: AgentTlsSettings::default(),
             target: TargetSettings::default(),
+            targets: Vec::new(),
             log: LogSettings::default(),
         }
     }
@@ -1160,6 +1201,11 @@ impl AgentConfig {
         }
         if let Some(p) = &mut self.target.tls_ca {
             resolve_path(base, p);
+        }
+        for target in &mut self.targets {
+            if let Some(p) = &mut target.tls_ca {
+                resolve_path(base, p);
+            }
         }
     }
 
@@ -1222,6 +1268,76 @@ impl AgentConfig {
         if self.target.request_timeout.is_zero() {
             return Err(Error::Config("target.request_timeout must be > 0".into()));
         }
+        if self.targets.len() > 64 {
+            return Err(Error::Config(
+                "too many [[targets]] entries (max 64); use a local router such as new-api/LiteLLM"
+                    .into(),
+            ));
+        }
+        let mut names = std::collections::HashSet::new();
+        let mut prefixes = std::collections::HashSet::new();
+        for (idx, target) in self.targets.iter().enumerate() {
+            if target.name.trim().is_empty() {
+                return Err(Error::Config(format!(
+                    "targets[{idx}].name must not be empty"
+                )));
+            }
+            if !names.insert(target.name.trim().to_ascii_lowercase()) {
+                return Err(Error::Config(format!(
+                    "duplicate target name `{}`",
+                    target.name
+                )));
+            }
+            let prefix = normalize_prefix(&target.prefix)
+                .map_err(|e| Error::Config(format!("targets[{idx}].prefix: {e}")))?;
+            if prefix == "/" {
+                return Err(Error::Config(format!(
+                    "targets[{idx}].prefix must not be `/`; use [target] for the fallback upstream"
+                )));
+            }
+            if !prefixes.insert(prefix.to_ascii_lowercase()) {
+                return Err(Error::Config(format!("duplicate target prefix `{prefix}`")));
+            }
+            let uri: http::Uri = target
+                .url
+                .parse()
+                .map_err(|e| Error::Config(format!("targets[{idx}].url: {e}")))?;
+            match uri.scheme_str() {
+                Some("http") | Some("https") => {}
+                Some(other) => {
+                    return Err(Error::Config(format!(
+                        "targets[{idx}].url scheme `{other}` is not supported (use http/https)"
+                    )))
+                }
+                None => {
+                    return Err(Error::Config(format!(
+                        "targets[{idx}].url must be absolute"
+                    )))
+                }
+            }
+            if uri.authority().is_none() {
+                return Err(Error::Config(format!(
+                    "targets[{idx}].url must include a host"
+                )));
+            }
+            if target.request_timeout.is_some_and(|d| d.is_zero()) {
+                return Err(Error::Config(format!(
+                    "targets[{idx}].request_timeout must be > 0"
+                )));
+            }
+            if target.connect_timeout.is_some_and(|d| d.is_zero()) {
+                return Err(Error::Config(format!(
+                    "targets[{idx}].connect_timeout must be > 0"
+                )));
+            }
+            for name in target.headers.keys() {
+                if header::HeaderName::from_bytes(name.as_bytes()).is_err() {
+                    return Err(Error::Config(format!(
+                        "targets[{idx}].headers contains invalid header name `{name}`"
+                    )));
+                }
+            }
+        }
         if self.target.connect_timeout.is_zero() {
             return Err(Error::Config("target.connect_timeout must be > 0".into()));
         }
@@ -1260,6 +1376,31 @@ impl AgentConfig {
 /// (`:0` means "let the kernel pick", so equal `:0` entries do not collide).
 fn same_listen(a: SocketAddr, b: SocketAddr) -> bool {
     a == b && a.port() != 0
+}
+
+/// Normalize a target path prefix: leading `/`, no trailing `/`, no traversal.
+pub fn normalize_prefix(input: &str) -> Result<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(Error::Config("prefix must not be empty".into()));
+    }
+    if !trimmed.starts_with('/') {
+        return Err(Error::Config(format!(
+            "prefix `{trimmed}` must start with '/'"
+        )));
+    }
+    let mut out = trimmed.trim_end_matches('/').to_string();
+    if out.is_empty() {
+        out.push('/');
+    }
+    for segment in out.split('/') {
+        if segment == ".." || segment.chars().any(char::is_whitespace) {
+            return Err(Error::Config(format!(
+                "prefix `{trimmed}` contains invalid path segments"
+            )));
+        }
+    }
+    Ok(out)
 }
 
 fn resolve_path(base: &Path, p: &mut PathBuf) {
@@ -1837,6 +1978,116 @@ mod tests {
         assert!(a.server_parts().is_err());
         a.server = "gw".into();
         assert!(a.server_parts().is_err());
+    }
+
+    #[test]
+    fn agent_multi_target_config() {
+        let text = r#"
+            [agent]
+            id = "home"
+            server = "gw.example.com:443"
+            token = "agt_0123456789abcdef0123456789"
+            [target]
+            url = "http://127.0.0.1:8000"
+            [[targets]]
+            name = "qwen"
+            prefix = "/qwen/"
+            url = "http://127.0.0.1:8001"
+            [[targets]]
+            name = "llama"
+            prefix = "/v1/llama"
+            url = "http://127.0.0.1:8002"
+            headers = { "x-upstream" = "llama" }
+            enabled = false
+        "#;
+        let cfg = AgentConfig::from_toml_str(text).unwrap();
+        assert_eq!(cfg.targets.len(), 2);
+        assert_eq!(normalize_prefix(&cfg.targets[0].prefix).unwrap(), "/qwen");
+        assert!(!cfg.targets[1].enabled);
+    }
+
+    #[test]
+    fn agent_multi_target_validation() {
+        let base = |extra: &str| {
+            format!(
+                r#"
+                [agent]
+                id = "home"
+                server = "gw.example.com:443"
+                token = "agt_0123456789abcdef0123456789"
+                {extra}
+                "#
+            )
+        };
+        // Duplicate prefix.
+        let text = base(
+            r#"
+            [[targets]]
+            name = "a"
+            prefix = "/x"
+            url = "http://127.0.0.1:8001"
+            [[targets]]
+            name = "b"
+            prefix = "/x/"
+            url = "http://127.0.0.1:8002"
+        "#,
+        );
+        assert!(AgentConfig::from_toml_str(&text).is_err());
+        // Root prefix is not allowed.
+        let text = base(
+            r#"
+            [[targets]]
+            name = "a"
+            prefix = "/"
+            url = "http://127.0.0.1:8001"
+        "#,
+        );
+        let err = AgentConfig::from_toml_str(&text).unwrap_err();
+        assert!(err.to_string().contains("must not be `/`"), "{err}");
+        // Unsupported scheme.
+        let text = base(
+            r#"
+            [[targets]]
+            name = "a"
+            prefix = "/x"
+            url = "ftp://127.0.0.1:8001"
+        "#,
+        );
+        assert!(AgentConfig::from_toml_str(&text).is_err());
+        // Duplicate names.
+        let text = base(
+            r#"
+            [[targets]]
+            name = "a"
+            prefix = "/x"
+            url = "http://127.0.0.1:8001"
+            [[targets]]
+            name = "A"
+            prefix = "/y"
+            url = "http://127.0.0.1:8002"
+        "#,
+        );
+        assert!(AgentConfig::from_toml_str(&text).is_err());
+        // Prefix without leading slash.
+        let text = base(
+            r#"
+            [[targets]]
+            name = "a"
+            prefix = "x"
+            url = "http://127.0.0.1:8001"
+        "#,
+        );
+        assert!(AgentConfig::from_toml_str(&text).is_err());
+    }
+
+    #[test]
+    fn prefix_normalization() {
+        assert_eq!(normalize_prefix("/qwen/").unwrap(), "/qwen");
+        assert_eq!(normalize_prefix("/a/b").unwrap(), "/a/b");
+        assert!(normalize_prefix("").is_err());
+        assert!(normalize_prefix("qwen").is_err());
+        assert!(normalize_prefix("/a/../b").is_err());
+        assert!(normalize_prefix("/a b").is_err());
     }
 
     #[test]

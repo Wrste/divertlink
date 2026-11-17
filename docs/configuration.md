@@ -21,7 +21,8 @@
   - [3.1 `[agent]`](#31-agent)
   - [3.2 `[tls]`](#32-tls)
   - [3.3 `[target]`](#33-target)
-  - [3.4 `[log]`](#34-log)
+  - [3.4 `[[targets]]`（多上游路径前缀路由）](#34-targets多上游路径前缀路由)
+  - [3.5 `[log]`](#35-log)
 - [4. 环境变量](#4-环境变量)
 - [5. 校验规则](#5-校验规则)
 - [6. 最小配置](#6-最小配置)
@@ -158,6 +159,11 @@
 | `request_timeout` | string(时长) | 继承 `[limits].request_timeout` | 可选 | 该隧道单请求超时；需覆盖最长生成耗时 |
 | `enabled` | boolean | `true` | 可选 | 为 `false` 时保留配置但该隧道不接受流量 |
 
+> **多 agent 同一隧道**：多个 agent 使用相同 `id` 与 `token` 接入时，网关会在会话之间
+> round-robin，并在某个 agent 失联时自动切换（流级故障转移）；`/status` 的 `agents` /
+> `sessions` 字段可查看明细，`max_streams` 为隧道级共享上限。详见
+> [多模型与多对一部署](multi-model.md#多机冗余多个-agent-服务同一条隧道)。
+
 一条隧道必须至少配置 `mount`、`hosts`、`default = true` 之一，否则校验会报
 “unreachable”。实际路由优先级如下（`src/registry.rs` 的 `resolve`）：
 
@@ -231,6 +237,11 @@
 
 ### 3.3 `[target]`
 
+> 多模型 / 多上游：除默认 `[target]` 外，还可以用 [`[[targets]]`](#34-targets多上游路径前缀路由)
+> 声明更多本地上游；同一隧道也可以被多个 agent 同时接入（见 `[[tunnels]]` 的说明）。
+
+
+
 | 字段 | 类型 | 默认值 | 必填性 | 说明 |
 | --- | --- | --- | --- | --- |
 | `url` | string(URL) | `"http://127.0.0.1:8000"` | 可选（建议显式配置） | 家庭端服务基础地址，必须是 `http://` 或 `https://` 绝对 URL；vLLM `:8000`、Ollama `:11434`、new-api `:3000` |
@@ -244,7 +255,42 @@
 > 响应数据，数据流仍会被 agent 主动中断；降低该值需要改代码，网关的
 > `stream_idle_timeout` 只能收紧、不能放宽这一上限。
 
-### 3.4 `[log]`
+### 3.4 `[[targets]]`（多上游路径前缀路由）
+
+一台机器上跑多个模型服务时，可以在一个 agent 里声明多个本地上游；agent 按**路径前缀**
+选择上游并剥离前缀（完整说明与客户端 base_url 示例见
+[多模型与多对一部署](multi-model.md)）。
+
+```toml
+[target]
+url = "http://127.0.0.1:8000"     # 默认上游（未命中任何 prefix 时）
+
+[[targets]]
+name = "qwen"                     # 唯一名称，用于日志与 x-divertlink-target 响应头
+prefix = "/qwen"                  # 必填，必须 / 开头，不能是 "/"；剥离后转发
+url = "http://127.0.0.1:8001"
+request_timeout = "10m"           # 可选，默认继承 [target].request_timeout
+connect_timeout = "5s"            # 可选，默认继承 [target].connect_timeout
+# tls_ca = "certs/upstream-ca.crt"
+headers = { "x-upstream" = "qwen" }   # 仅发往该上游
+enabled = true
+```
+
+| 字段 | 类型 | 默认值 | 必填性 | 说明 |
+| --- | --- | --- | --- | --- |
+| `name` | string | 无 | **必填** | 唯一名称（大小写不敏感），出现在日志与响应头 `x-divertlink-target` |
+| `prefix` | string | 无 | **必填** | 路径前缀；最长前缀优先、必须命中完整路径段（`/qwen` 不匹配 `/qwenlite`）；不能为 `/`；同配置内唯一 |
+| `url` | string(URL) | 无 | **必填** | 本地上游绝对地址（http/https） |
+| `request_timeout` | string(时长) | 继承 `[target]` | 可选 | 该上游响应头超时 |
+| `connect_timeout` | string(时长) | 继承 `[target]` | 可选 | 该上游连接超时 |
+| `tls_ca` | string(路径) | 继承系统根证书 | 可选 | 上游为 HTTPS 且使用私有 CA 时 |
+| `headers` | map[string]string | `{}` | 可选 | 仅发往该上游的静态头 |
+| `enabled` | boolean | `true` | 可选 | 关闭后不参与路由，可保留配置 |
+
+规则与限制：最多 64 条；`prefix` 必须唯一且合法；未命中时走 `[target]`；agent **不解析
+请求体**（不按 `model` 字段路由），按模型名路由请用 new-api/LiteLLM 作为统一入口。
+
+### 3.5 `[log]`
 
 | 字段 | 类型 | 默认值 | 必填性 | 说明 |
 | --- | --- | --- | --- | --- |

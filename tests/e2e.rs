@@ -40,11 +40,23 @@ use divertlink::upstream;
 // Mock model server
 // ---------------------------------------------------------------------------
 
-#[derive(Default)]
 struct UpstreamState {
     inflight: AtomicI64,
     cancelled: AtomicU64,
     last_auth: Mutex<Vec<String>>,
+    /// Identifier returned by `/marker`, used to tell upstreams apart.
+    marker: &'static str,
+}
+
+impl Default for UpstreamState {
+    fn default() -> Self {
+        UpstreamState {
+            inflight: AtomicI64::new(0),
+            cancelled: AtomicU64::new(0),
+            last_auth: Mutex::new(Vec::new()),
+            marker: "mock",
+        }
+    }
 }
 
 impl UpstreamState {
@@ -72,6 +84,7 @@ async fn upstream_app(state: Arc<UpstreamState>) -> Router {
         .route("/sse", get(mock_sse))
         .route("/slow", get(mock_slow))
         .route("/health", get(mock_health))
+        .route("/marker", get(mock_marker))
         .layer(axum::extract::DefaultBodyLimit::disable())
         .with_state(state)
 }
@@ -210,6 +223,10 @@ async fn mock_health() -> &'static str {
     "ok"
 }
 
+async fn mock_marker(State(state): State<Arc<UpstreamState>>) -> Json<Value> {
+    Json(json!({"marker": state.marker}))
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -221,7 +238,14 @@ struct MockUpstream {
 }
 
 async fn start_mock_upstream() -> MockUpstream {
-    let state = Arc::new(UpstreamState::default());
+    start_mock_upstream_marked("mock").await
+}
+
+async fn start_mock_upstream_marked(marker: &'static str) -> MockUpstream {
+    let state = Arc::new(UpstreamState {
+        marker,
+        ..Default::default()
+    });
     let app = upstream_app(state.clone()).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -271,6 +295,7 @@ struct Rig {
     client: Client<HttpsConnector<HttpConnector>, Body>,
     ca: PathBuf,
     server_config: ServerConfig,
+    agent_config: AgentConfig,
     dead: bool,
 }
 
@@ -376,6 +401,7 @@ impl Rig {
             client,
             ca,
             server_config,
+            agent_config,
             dead: false,
         };
         rig.wait_ready(Duration::from_secs(10)).await;
@@ -1081,7 +1107,9 @@ async fn start_custom_tls(
     let ingress_port = addrs.ingress.expect("ingress").port();
     let admin = addrs.admin.expect("admin");
     agent_config.agent.server = format!("127.0.0.1:{tunnel_port}");
-    let agent = agent::run(agent_config, None).await.expect("agent starts");
+    let agent = agent::run(agent_config.clone(), None)
+        .await
+        .expect("agent starts");
     let rig = Rig {
         _tmp: TempDir::new().unwrap(),
         ingress_port,
@@ -1090,6 +1118,7 @@ async fn start_custom_tls(
         agent: Some(agent),
         client,
         ca,
+        agent_config,
         server_config,
         dead: false,
     };
@@ -1368,5 +1397,152 @@ async fn sse_responses_are_marked_unbuffered() {
         .unwrap();
     assert!(cache_control.contains("no-transform"), "{cache_control}");
     let _ = response.into_body().collect().await.unwrap();
+    rig.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn agent_multi_targets_route_by_prefix() {
+    // One agent, two local model servers: many models -> one gateway.
+    let upstream_a = start_mock_upstream_marked("A").await;
+    let upstream_b = start_mock_upstream_marked("B").await;
+    let tmp = TempDir::new().unwrap();
+    let certs = tls::generate_certs(&GenCertsOptions {
+        dir: tmp.path().join("certs"),
+        domain: "localhost".into(),
+        client_cert: false,
+        self_signed: false,
+        force: false,
+    })
+    .unwrap();
+    let port = reserve_port();
+    let mut builder = RigBuilder::new(upstream_a.addr, certs.ca_cert.clone(), port);
+    builder.server_config.tls.cert = certs.server_cert.clone();
+    builder.server_config.tls.key = certs.server_key.clone();
+    builder
+        .agent_config
+        .targets
+        .push(divertlink::config::AgentTarget {
+            name: "qwen".into(),
+            prefix: "/qwen".into(),
+            url: format!("http://{}", upstream_b.addr),
+            request_timeout: None,
+            connect_timeout: None,
+            tls_ca: None,
+            headers: Default::default(),
+            enabled: true,
+        });
+    let rig = Rig::start_with(builder.build(), tmp.path().to_path_buf()).await;
+
+    // Default upstream (A).
+    let (status, headers, body) = rig.get("/home/marker", Some("Bearer dlk_test_key")).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let value: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["marker"], "A");
+    assert_eq!(headers.get("x-divertlink-target").unwrap(), "default");
+
+    // Prefix-routed upstream (B): /home/qwen/marker -> agent path /qwen/marker -> B /marker.
+    let (status, headers, body) = rig
+        .get("/home/qwen/marker", Some("Bearer dlk_test_key"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let value: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["marker"], "B");
+    assert_eq!(headers.get("x-divertlink-target").unwrap(), "qwen");
+
+    // OpenAI-style paths are preserved after stripping the prefix.
+    let (status, headers, body) = rig
+        .get("/home/qwen/v1/models", Some("Bearer dlk_test_key"))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let value: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["data"][0]["id"], "mock-model");
+    assert_eq!(headers.get("x-divertlink-target").unwrap(), "qwen");
+
+    // Prefix matching is on segment boundaries: /qwenlite must not match /qwen,
+    // so it falls through to the default upstream (which answers 404 for it).
+    let (status, headers, _body) = rig
+        .get("/home/qwenlite/marker", Some("Bearer dlk_test_key"))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(headers.get("x-divertlink-target").unwrap(), "default");
+
+    rig.shutdown().await;
+    upstream_a.shutdown.cancel();
+    upstream_b.shutdown.cancel();
+    std::mem::forget(tmp);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn multiple_agents_share_one_tunnel_with_failover() {
+    // Two agents (e.g. two home machines with the same model) serve ONE tunnel.
+    // Requests are load-balanced round-robin and survive one agent going away.
+    let (mut rig, _upstream) = new_rig(|_| {}).await;
+    let second_agent = agent::run(rig.agent_config.clone(), None)
+        .await
+        .expect("second agent starts");
+
+    let wait_agents = |rig: &Rig, expected: usize| {
+        let admin = rig.admin;
+        let client = rig.client.clone();
+        async move {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                let response = client
+                    .request(
+                        Request::builder()
+                            .uri(format!("http://{admin}/status"))
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let bytes = response.into_body().collect().await.unwrap().to_bytes();
+                let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                let agents = value["tunnels"][0]["agents"].as_u64().unwrap_or(0) as usize;
+                if agents == expected {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            false
+        }
+    };
+
+    assert!(
+        wait_agents(&rig, 2).await,
+        "both agents should register on the same tunnel"
+    );
+
+    // Traffic is served while both agents are online.
+    for _ in 0..8 {
+        let (status, _, body) = rig
+            .get("/home/v1/models", Some("Bearer dlk_test_key"))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    }
+
+    // Stop the first agent: the second one must keep serving the tunnel.
+    if let Some(first) = rig.agent.take() {
+        first.shutdown().await;
+    }
+    assert!(
+        wait_agents(&rig, 1).await,
+        "the remaining agent should stay registered after its peer disconnects"
+    );
+    for _ in 0..5 {
+        let (status, _, body) = rig
+            .get("/home/v1/models", Some("Bearer dlk_test_key"))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    }
+
+    // Stop the second agent too: the tunnel becomes unavailable.
+    second_agent.shutdown().await;
+    assert!(wait_agents(&rig, 0).await, "all agents disconnected");
+    let (status, _, _) = rig
+        .get("/home/v1/models", Some("Bearer dlk_test_key"))
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+
     rig.shutdown().await;
 }

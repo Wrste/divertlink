@@ -1,0 +1,27 @@
+# 家庭机器 A：只跑 Qwen（vLLM，:8000），对应网关 [[tunnels]] id = "qwen"。
+
+[agent]
+id = "qwen"
+server = "gateway.example.com:443"
+token = "agt_qwen_REPLACE_ME_0123456789abcdef"
+heartbeat = "5s"
+heartbeat_timeout = "15s"
+heartbeat_mode = "both"
+max_inflight = 128
+reconnect_min = "1s"
+reconnect_max = "60s"
+reconnect_jitter = 0.3
+protocols = ["openai", "vllm"]
+
+[tls]
+ca = "certs/ca.crt"
+# pin = "<gen-certs 输出的 SPKI pin>"
+
+[target]
+url = "http://127.0.0.1:8000"
+request_timeout = "10m"
+connect_timeout = "5s"
+
+[log]
+level = "info"
+format = "text"

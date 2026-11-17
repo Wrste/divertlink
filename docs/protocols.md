@@ -153,6 +153,9 @@ vLLM 的非 OpenAI 路径直接拼接在 mount 之后：
 > [§5.2](#52-拓扑-b网关静态路由反代到-new-api) 与
 > [配置参考 §2.7](configuration.md#27-static_routes)。
 
+> 多模型/多上游场景（一个网关多个模型、一个 agent 多本地服务、多 agent 冗余）的 base_url
+> 与路由规则见 [多模型与多对一部署](multi-model.md)。
+
 ### 3.2 上游认证头的四种处理方式
 
 每个隧道用 `upstream_auth_header` 决定发到家庭端的认证头（见

@@ -7,6 +7,7 @@
 
 # 证书与私钥：绝不入库（TLS 密钥、CA、SPKI pin 相关材料）
 /certs/
+**/certs/
 *.pem
 *.key
 *.crt

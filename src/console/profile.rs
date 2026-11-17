@@ -384,6 +384,19 @@ pub struct ConfigSummary {
     pub auth_enabled: bool,
     /// Mounts exposed by server configs.
     pub mounts: Vec<String>,
+    /// Local upstreams served by one agent (multi-target mode).
+    pub targets: Vec<TargetSummary>,
+}
+
+/// One local upstream of an agent config, for display.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TargetSummary {
+    /// Upstream name.
+    pub name: String,
+    /// Path prefix (stripped before forwarding); `None` = fallback target.
+    pub prefix: Option<String>,
+    /// Base URL.
+    pub url: String,
 }
 
 /// Parse a config file into [`ConfigSummary`].
@@ -429,6 +442,15 @@ pub fn summarize_config(config: &Path) -> Result<ConfigSummary> {
             server: Some(agent.agent.server.clone()),
             target: Some(agent.target.url.clone()),
             tunnel_id: Some(agent.agent.id.clone()),
+            targets: agent
+                .targets
+                .iter()
+                .map(|target| TargetSummary {
+                    name: target.name.clone(),
+                    prefix: Some(target.prefix.clone()),
+                    url: target.url.clone(),
+                })
+                .collect(),
             ..Default::default()
         }),
         Err(err) => Err(Error::Config(format!(

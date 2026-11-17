@@ -1,0 +1,98 @@
+# DivertLink：多模型 / 多对一网关示例。
+#
+# 一个公网网关同时接入多个家庭端模型服务：
+#   /qwen   -> qwen 家庭机器（agent-qwen.toml）
+#   /llama  -> llama 家庭机器（agent-llama.toml）
+#   /mixed  -> 一台机器上的多个本地模型（agent-mixed.toml，[[targets]] 路径前缀）
+#
+# 也可让多个 agent 使用同一个 id/token 接入同一条隧道做横向扩展/故障转移；
+# 详见 ../../docs/multi-model.md。
+
+[server]
+name = "divertlink-multi-model"
+tunnel_listen = "0.0.0.0:443"
+ingress_listen = "0.0.0.0:443"
+http_listen = "127.0.0.1:8080"
+admin_listen = "127.0.0.1:9090"
+trust_proxy = false
+shutdown_grace = "10s"
+
+[tls]
+cert = "certs/server.crt"
+key = "certs/server.key"
+min_version = "1.3"
+
+[limits]
+max_request_bytes = "64MiB"
+request_timeout = "10m"
+stream_idle_timeout = "120s"
+header_read_timeout = "10s"
+max_streams_per_tunnel = 256
+max_connections = 1024
+allowed_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+# 多模型场景建议加一个网关级总限流，避免单个客户端打满所有模型出口：
+# global_rate_limit = "6000/min"
+
+[log]
+level = "info"
+format = "text"
+
+# 每个调用方一个 Key，并用 allow_tunnels 绑定可访问的模型（隧道）。
+[[api_keys]]
+name = "team-qwen"
+key = "dlk_qwen_REPLACE_ME_0123456789abcdef"
+allow_tunnels = ["qwen"]
+rate_limit = "600/min"
+max_concurrent = 64
+
+[[api_keys]]
+name = "team-llama"
+key = "dlk_llama_REPLACE_ME_0123456789abcdef"
+allow_tunnels = ["llama"]
+rate_limit = "300/min"
+max_concurrent = 32
+
+[[api_keys]]
+name = "all-models"
+key = "dlk_all_REPLACE_ME_0123456789abcdef"
+allow_tunnels = []
+rate_limit = "1200/min"
+max_concurrent = 128
+
+# 模型 1：Qwen（独立家庭机器 / 独立 GPU）
+[[tunnels]]
+id = "qwen"
+token = "agt_qwen_REPLACE_ME_0123456789abcdef"
+mount = "/qwen"
+protocols = ["openai", "vllm"]
+public_paths = ["/health"]
+max_streams = 128
+request_timeout = "10m"
+
+# 模型 2：Llama（另一台家庭机器）
+[[tunnels]]
+id = "llama"
+token = "agt_llama_REPLACE_ME_0123456789abcdef"
+mount = "/llama"
+protocols = ["openai", "vllm"]
+public_paths = ["/health"]
+max_streams = 64
+
+# 模型 3：一台机器上的多个本地服务（agent 用 [[targets]] 前缀路由）
+#   /mixed/qwen/...  -> 家庭端 :8001
+#   /mixed/llama/... -> 家庭端 :8002
+#   /mixed/...       -> 家庭端默认 target（:8000）
+[[tunnels]]
+id = "mixed"
+token = "agt_mixed_REPLACE_ME_0123456789abcdef"
+mount = "/mixed"
+protocols = ["openai", "anthropic", "vllm"]
+public_paths = ["/health"]
+max_streams = 64
+
+# 可选：new-api 等上层平台作为另一个入口（require_auth = false 时由 new-api 自校验）
+# [[static_routes]]
+# mount = "/ai"
+# upstream = "http://127.0.0.1:3000"
+# strip_prefix = true
+# require_auth = false

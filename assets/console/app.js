@@ -206,6 +206,12 @@ function renderOverview() {
     rows.push(["网关", `<code>${escapeHtml(s.server || "—")}</code>`]);
     rows.push(["隧道 ID", `<code>${escapeHtml(s.tunnel_id || "—")}</code>`]);
     rows.push(["本地目标", `<code>${escapeHtml(s.target || "—")}</code>`]);
+    if (s.targets && s.targets.length) {
+      const list = s.targets
+        .map((t) => `<code>${escapeHtml(t.prefix || "")}</code> → <code>${escapeHtml(t.url)}</code>（${escapeHtml(t.name)}）`)
+        .join("<br>");
+      rows.push([`多上游 (${s.targets.length + 1})`, list]);
+    }
     rows.push(["心跳/重连", "应用层心跳·指数退避"]);
   } else {
     rows.push(["实例名", escapeHtml(s.name || "—")]);
@@ -262,7 +268,11 @@ function renderLive() {
         <span class="dot ${x.connected ? "on" : ""}"></span>
         <strong>${escapeHtml(x.id)}</strong>
         <code>${escapeHtml(x.mount || (x.hosts && x.hosts[0]) || "host/default")}</code>
-        <span class="muted" style="margin-left:auto">${x.connected ? (x.session ? "agent " + escapeHtml(x.session.agent_version || "") : "在线") : "离线"}</span>
+        <span class="muted" style="margin-left:auto">${
+          x.connected
+            ? (x.agents > 1 ? `${x.agents} agents` : (x.session ? "agent " + escapeHtml(x.session.agent_version || "") : "在线"))
+            : "离线"
+        }</span>
       </div>`
     )
     .join("") || `<div class="hint">尚未配置隧道</div>`;

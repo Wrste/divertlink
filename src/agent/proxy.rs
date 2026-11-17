@@ -53,10 +53,12 @@ async fn handle_request(
 ) -> std::result::Result<Response<Body>, std::convert::Infallible> {
     let request_id = new_request_id();
     let started = std::time::Instant::now();
-    let path = request.uri().path().to_string();
+    let request_path = request.uri().path().to_string();
     let query = request.uri().query().map(str::to_string);
     let method = request.method().clone();
-    let target = match join_upstream_uri(&state.target_uri, &path, query.as_deref()) {
+    // Pick the upstream by longest matching prefix; the prefix is stripped.
+    let (route, path) = state.route_for(&request_path);
+    let target = match join_upstream_uri(&route.uri, &path, query.as_deref()) {
         Ok(target) => target,
         Err(err) => {
             warn!(request_id = %request_id, error = %err, "invalid upstream URI");
@@ -76,7 +78,7 @@ async fn handle_request(
         }
         headers.append(name.clone(), value.clone());
     }
-    for (name, value) in &state.config.target.headers {
+    for (name, value) in &route.headers {
         if let (Ok(name), Ok(value)) = (
             header::HeaderName::from_bytes(name.as_bytes()),
             HeaderValue::from_str(value),
@@ -111,8 +113,8 @@ async fn handle_request(
     stats.inc_active();
 
     let response = tokio::time::timeout(
-        state.config.target.request_timeout,
-        state.target_client.request(upstream_request),
+        route.request_timeout,
+        route.client.request(upstream_request),
     )
     .await;
     let response = match response {
@@ -143,7 +145,8 @@ async fn handle_request(
     crate::httpfwd::apply_stream_headers(&mut response_headers);
     debug!(
         request_id = %request_id,
-        path = %path,
+        path = %request_path,
+        target = %route.name,
         status = %parts.status,
         ms = started.elapsed().as_millis() as u64,
         "local target responded"
@@ -159,6 +162,9 @@ async fn handle_request(
         response
             .headers_mut()
             .insert("x-divertlink-request-id", value);
+    }
+    if let Ok(value) = HeaderValue::from_str(&route.name) {
+        response.headers_mut().insert("x-divertlink-target", value);
     }
     Ok(response)
 }

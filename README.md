@@ -43,6 +43,9 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
   `divertlink agent -c agent.toml`；`divertlink init` 一键生成双端配置与证书。
 - **高性能**：tokio + hyper、零拷贝 `Bytes`、yamux 多路复用、上游连接池、
   `TCP_NODELAY`、流式双向转发与端到端背压。
+- **多模型 / 多对一**：一个网关可同时接入多个模型/多台机器（每条隧道独立 mount、
+  并发与鉴权）；一个 agent 可用 `[[targets]]` 路径前缀代理多个本地服务；同一模型可由
+  多个 agent 冗余（round-robin + 故障转移）。详见 [多模型部署](docs/multi-model.md)。
 - **new-api 友好**：三种组合方式——new-api 把网关配成渠道、网关静态路由反代
   new-api、agent 指向家庭端 new-api。
 - **可观测**：`/healthz`、`/readyz`、`/metrics`（Prometheus）、`/status`（隧道快照）。
@@ -255,6 +258,7 @@ curl -sS  http://127.0.0.1:9090/metrics   # Prometheus 文本指标
 | [性能与容量](docs/performance.md) | 性能设计、容量估算、压测方法、调优参数、常见瓶颈 |
 | [故障排查](docs/troubleshooting.md) | 按状态码与症状排查（401/403/404/413/429/502/503/504、SSE 缓冲、心跳、TLS、ALPN、NAT） |
 | [常见问题](docs/faq.md) | 与 frp/Cloudflare Tunnel 的区别、Ollama、Windows、多模型、域名、mTLS 等 |
+| [多模型 / 多对一](docs/multi-model.md) | 三种多对一拓扑、一个 agent 多上游前缀路由、多 agent 同隧道冗余、鉴权配额、base_url 与调优 |
 | [图形化客户端](docs/console.md) | 内置控制台：多配置管理、一键启停、实时日志、流量看板、TLS/证书探测、PWA、远程访问与安全模型 |
 | [部署文档](docs/deployment.md) | Docker/Compose、systemd、nginx/Caddy、证书获取、升级回滚 |
 | [示例配置](examples/README.md) | 可直接运行的双端示例与三端拓扑 |

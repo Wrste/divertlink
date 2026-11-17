@@ -1,0 +1,53 @@
+# 家庭机器 C：一台机器上跑多个模型，用一个 agent + [[targets]] 前缀路由暴露。
+#
+# 请求路径映射（网关 mount /mixed 剥离后）：
+#   /qwen/v1/chat/completions  -> http://127.0.0.1:8001/v1/chat/completions
+#   /llama/v1/chat/completions -> http://127.0.0.1:8002/v1/chat/completions
+#   /v1/chat/completions       -> http://127.0.0.1:8000/v1/chat/completions（默认 target）
+#
+# 也可以让多个 agent 使用同一 id/token 接入该隧道做冗余（网关 round-robin + 故障转移）。
+
+[agent]
+id = "mixed"
+server = "gateway.example.com:443"
+token = "agt_mixed_REPLACE_ME_0123456789abcdef"
+heartbeat = "5s"
+heartbeat_timeout = "15s"
+heartbeat_mode = "both"
+max_inflight = 256
+protocols = ["openai", "anthropic", "vllm"]
+
+[tls]
+ca = "certs/ca.crt"
+
+# 默认上游：Ollama / llama.cpp / new-api 等统一入口
+[target]
+url = "http://127.0.0.1:8000"
+request_timeout = "10m"
+connect_timeout = "5s"
+
+# 前缀路由：最长前缀优先，匹配到后剥离前缀再转发。
+[[targets]]
+name = "qwen"
+prefix = "/qwen"
+url = "http://127.0.0.1:8001"
+request_timeout = "10m"
+
+[[targets]]
+name = "llama"
+prefix = "/llama"
+url = "http://127.0.0.1:8002"
+request_timeout = "10m"
+# 只给这个上游加的静态头（例如本地 vLLM 的 --api-key）：
+# headers = { "x-api-key" = "sk-internal" }
+
+# 也可以把 Anthropic 兼容服务挂到子路径：
+# [[targets]]
+# name = "claude-local"
+# prefix = "/claude"
+# url = "http://127.0.0.1:8003"
+# enabled = true
+
+[log]
+level = "info"
+format = "text"

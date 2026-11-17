@@ -1,5 +1,8 @@
 # DivertLink 示例配置
 
+多模型 / 多对一示例见 [`multi-model/`](multi-model/README.md)（配套文档
+[docs/multi-model.md](../docs/multi-model.md)）。
+
 本目录给出可直接运行的双端示例配置与三端拓扑说明。示例中的域名
 `gateway.example.com`、`home.llm.example.com`、令牌与端口均为占位值，运行前请按实际
 情况替换（见各文件内注释）。

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -144,8 +144,11 @@ pub struct TunnelEntry {
     pub stats: Arc<TunnelStats>,
     /// Stream concurrency limiter.
     semaphore: Arc<Semaphore>,
-    /// Current session (replaced on agent reconnect).
-    session: RwLock<Option<Arc<ActiveSession>>>,
+    /// Live sessions. Multiple agents may serve the same tunnel for
+    /// scale-out/failover; requests are distributed round-robin.
+    sessions: RwLock<Vec<Arc<ActiveSession>>>,
+    /// Round-robin cursor across `sessions`.
+    cursor: AtomicUsize,
 }
 
 impl TunnelEntry {
@@ -175,57 +178,87 @@ impl TunnelEntry {
             request_timeout,
             stream_idle_timeout: default_stream_idle_timeout,
             semaphore: Arc::new(Semaphore::new(max_streams)),
-            session: RwLock::new(None),
+            sessions: RwLock::new(Vec::new()),
+            cursor: AtomicUsize::new(0),
             settings,
         })
     }
 
-    /// The current live session, if any.
-    pub fn session(&self) -> Option<Arc<ActiveSession>> {
-        self.session
+    /// Snapshot of the live sessions.
+    pub fn sessions(&self) -> Vec<Arc<ActiveSession>> {
+        self.sessions
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
 
-    /// Whether an agent is currently connected.
-    pub fn is_connected(&self) -> bool {
-        self.session()
-            .map(|s| !s.cancel.is_cancelled())
-            .unwrap_or(false)
+    /// Number of live sessions.
+    pub fn session_count(&self) -> usize {
+        self.sessions
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
     }
 
-    /// Install a new session, cancelling any previous one (agent reconnect).
+    /// The first live session (for status/diagnostics).
+    pub fn session(&self) -> Option<Arc<ActiveSession>> {
+        self.sessions().into_iter().next()
+    }
+
+    /// Whether at least one agent is currently connected.
+    pub fn is_connected(&self) -> bool {
+        self.sessions()
+            .iter()
+            .any(|session| !session.cancel.is_cancelled())
+    }
+
+    /// Register a session for this tunnel.
+    ///
+    /// Multiple agents may share one tunnel (scale-out / failover). Re-connecting
+    /// with the same session id replaces that entry; other sessions are kept.
     pub fn install_session(
         self: &Arc<Self>,
         session: Arc<ActiveSession>,
     ) -> Option<Arc<ActiveSession>> {
-        let old = self
-            .session
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .replace(session);
-        if let Some(old) = &old {
+        let mut guard = self.sessions.write().unwrap_or_else(|e| e.into_inner());
+        let replaced = if let Some(slot) = guard.iter_mut().find(|s| s.id == session.id) {
+            Some(std::mem::replace(slot, session))
+        } else {
+            guard.push(session);
+            None
+        };
+        drop(guard);
+        if let Some(old) = &replaced {
+            // Only reachable when the same agent re-registers the same session id;
+            // retire the stale connection.
             old.cancel.cancel();
         }
         self.stats.touch();
-        old
+        replaced
     }
 
-    /// Remove a session if it matches `session_id`.
+    /// Remove a session by id.
     pub fn remove_session(&self, session_id: &str) -> Option<Arc<ActiveSession>> {
-        let mut guard = self.session.write().unwrap_or_else(|e| e.into_inner());
-        let matches = guard.as_ref().map(|s| s.id == session_id).unwrap_or(false);
-        if matches {
-            guard.take()
-        } else {
-            None
-        }
+        let mut guard = self.sessions.write().unwrap_or_else(|e| e.into_inner());
+        let removed = guard
+            .iter()
+            .position(|s| s.id == session_id)
+            .map(|index| guard.remove(index));
+        drop(guard);
+        removed
+    }
+
+    /// Drop sessions whose cancellation token fired.
+    fn prune_sessions(&self) {
+        let mut guard = self.sessions.write().unwrap_or_else(|e| e.into_inner());
+        guard.retain(|session| !session.cancel.is_cancelled());
     }
 
     /// Open a data stream, respecting the per-tunnel concurrency limit.
     ///
-    /// The returned permit must be held for the lifetime of the stream.
+    /// Sessions are tried round-robin; a session that fails to open a stream is
+    /// cancelled (its agent is gone) and the next one is tried, which gives
+    /// transparent failover when several agents serve the same tunnel.
     pub async fn open_stream(&self) -> Result<(yamux::Stream, OwnedSemaphorePermit)> {
         let permit = self.semaphore.clone().try_acquire_owned().map_err(|_| {
             Error::Limit(format!(
@@ -233,11 +266,41 @@ impl TunnelEntry {
                 self.settings.id, self.max_streams, self.max_streams
             ))
         })?;
-        let session = self.session().ok_or_else(|| {
-            Error::Unavailable(format!("tunnel `{}` is not connected", self.settings.id))
-        })?;
-        let stream = session.open_stream().await?;
-        Ok((stream, permit))
+        self.prune_sessions();
+        let sessions = self.sessions();
+        if sessions.is_empty() {
+            return Err(Error::Unavailable(format!(
+                "tunnel `{}` is not connected",
+                self.settings.id
+            )));
+        }
+        let start = self.cursor.fetch_add(1, Ordering::Relaxed) % sessions.len();
+        let mut last_error = None;
+        for offset in 0..sessions.len() {
+            let session = &sessions[(start + offset) % sessions.len()];
+            if session.cancel.is_cancelled() {
+                continue;
+            }
+            match session.open_stream().await {
+                Ok(stream) => {
+                    self.stats.touch();
+                    return Ok((stream, permit));
+                }
+                Err(err) => {
+                    // The agent behind this session is unreachable; retire it and
+                    // fail over to the remaining sessions.
+                    session.cancel.cancel();
+                    last_error = Some(err);
+                }
+            }
+        }
+        self.prune_sessions();
+        Err(last_error.unwrap_or_else(|| {
+            Error::Unavailable(format!(
+                "tunnel `{}` has no reachable agent",
+                self.settings.id
+            ))
+        }))
     }
 }
 
@@ -429,7 +492,9 @@ impl Registry {
         best.map(|(_, r)| r)
     }
 
-    /// Install an agent session, replacing the previous one.
+    /// Install an agent session. Additional sessions for the same tunnel join the
+    /// rotation (multi-agent scale-out/failover); a session with the same id is
+    /// replaced.
     pub fn install_session(
         &self,
         tunnel_id: &str,
@@ -443,7 +508,7 @@ impl Registry {
         Ok(old)
     }
 
-    /// Remove a session if it is still the active one.
+    /// Remove one session of a tunnel.
     pub fn remove_session(&self, tunnel_id: &str, session_id: &str) {
         if let Some(entry) = self.tunnels.get(tunnel_id) {
             let removed = entry.remove_session(session_id);
@@ -457,14 +522,16 @@ impl Registry {
     pub fn status_json(&self) -> serde_json::Value {
         let mut tunnels = Vec::with_capacity(self.tunnels.len());
         for entry in self.tunnels.values() {
-            let session = entry.session();
+            let sessions = entry.sessions();
             tunnels.push(serde_json::json!({
                 "id": entry.settings.id,
                 "mount": entry.mount,
                 "hosts": entry.hosts,
                 "connected": entry.is_connected(),
+                "agents": sessions.len(),
                 "max_streams": entry.max_streams,
-                "session": session.as_ref().map(|s| serde_json::json!({
+                // `session` is kept for compatibility: the first live agent.
+                "session": sessions.first().map(|s| serde_json::json!({
                     "id": s.id,
                     "agent_version": s.agent_version,
                     "peer": s.peer.to_string(),
@@ -473,6 +540,15 @@ impl Registry {
                     "last_seen_unix": s.last_seen_unix.load(Ordering::Relaxed),
                     "max_streams": s.max_streams,
                 })),
+                "sessions": sessions.iter().map(|s| serde_json::json!({
+                    "id": s.id,
+                    "agent_version": s.agent_version,
+                    "peer": s.peer.to_string(),
+                    "protocols": s.protocols,
+                    "opened_seconds_ago": s.opened_at.elapsed().as_secs(),
+                    "last_seen_unix": s.last_seen_unix.load(Ordering::Relaxed),
+                    "max_streams": s.max_streams,
+                })).collect::<Vec<_>>(),
                 "stats": {
                     "active_requests": entry.stats.active.load(Ordering::Relaxed),
                     "requests_total": entry.stats.requests.load(Ordering::Relaxed),
@@ -608,7 +684,10 @@ mod tests {
             Arc::new(AtomicU64::new(unix_now())),
         );
         registry.install_session("home", session1.clone()).unwrap();
-        assert!(registry.tunnel("home").unwrap().is_connected());
+        let entry = registry.tunnel("home").unwrap();
+        assert!(entry.is_connected());
+        assert_eq!(entry.session_count(), 1);
+        // A second agent joins the same tunnel (multi-agent scale-out).
         let (tx2, _rx2) = ActiveSession::channels();
         let session2 = ActiveSession::new(
             "s2".into(),
@@ -622,11 +701,35 @@ mod tests {
             tx2,
             Arc::new(AtomicU64::new(unix_now())),
         );
-        let old = registry.install_session("home", session2.clone()).unwrap();
-        assert!(old.is_some());
+        assert!(registry
+            .install_session("home", session2.clone())
+            .unwrap()
+            .is_none());
+        assert_eq!(entry.session_count(), 2);
+        assert!(!session1.cancel.is_cancelled());
+        // Re-registering the same session id replaces (and cancels) the old one.
+        let (tx3, _rx3) = ActiveSession::channels();
+        let session1b = ActiveSession::new(
+            "s1".into(),
+            "home".into(),
+            "agent".into(),
+            vec![],
+            vec![],
+            "127.0.0.1:5557".parse().unwrap(),
+            8,
+            CancellationToken::new(),
+            tx3,
+            Arc::new(AtomicU64::new(unix_now())),
+        );
+        let replaced = registry.install_session("home", session1b).unwrap();
+        assert!(replaced.is_some());
         assert!(session1.cancel.is_cancelled());
+        assert_eq!(entry.session_count(), 2);
         registry.remove_session("home", "s2");
-        assert!(!registry.tunnel("home").unwrap().is_connected());
+        assert_eq!(entry.session_count(), 1);
+        registry.remove_session("home", "s1");
+        assert!(!entry.is_connected());
+        assert_eq!(entry.session_count(), 0);
     }
 
     #[tokio::test]
