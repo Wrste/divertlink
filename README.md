@@ -94,7 +94,9 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 | Docker | [本地构建镜像与 Compose 部署](docs/deployment.md#5-docker-部署) |
 
 下载入口：[GitHub Releases](https://github.com/Wrste/divertlink/releases)。
-**当前尚无 Release，请先按源码安装步骤构建**；发行包命令需等对应版本发布后使用。
+[v0.1.0](https://github.com/Wrste/divertlink/releases/tag/v0.1.0) 已提供 Linux x86_64/ARM64
+和经过签名、公证的 macOS Intel/Apple Silicon 安装包，下载后即可运行。
+Windows 预构建包尚未发布，可先按源码安装步骤构建。
 安装后运行 `divertlink version`、`divertlink --help` 验证；桌面用户可运行
 `divertlink console --open` 打开图形界面，再继续下方配置步骤。
 常见安装问题见[快速开始第 2.7 节](docs/quickstart.md#27-安装验证与常见问题)。

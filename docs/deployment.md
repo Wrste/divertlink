@@ -69,9 +69,10 @@ Windows、macOS 与 Linux 的下载、校验、PATH 和源码构建步骤见
 以下假设网关域名 `llm.example.com`、版本 `0.1.0`、agent 隧道 id `home`、mount `/home`。
 单端口 ALPN 共用模式不需要 nginx/Caddy。
 
-**当前仓库尚无 Release**，下面的 `--version` 在线安装示例需等对应版本发布后使用。
-目前请按[源码安装](quickstart.md#25-从源码安装所有平台)构建，再将
-`--version 0.1.0` 替换为 `--binary ./target/release/divertlink`。
+[v0.1.0](https://github.com/Wrste/divertlink/releases/tag/v0.1.0) 已提供 Linux/macOS
+发行包，可直接执行下面的 `--version 0.1.0` 在线安装示例。也可按
+[源码安装](quickstart.md#25-从源码安装所有平台)构建，再将 `--version 0.1.0`
+替换为 `--binary ./target/release/divertlink` 离线安装。
 
 ### 2.1 在公网服务器安装 gateway
 

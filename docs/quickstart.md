@@ -45,7 +45,7 @@
 - [Linux 发行包](#22-linux-安装发行包)
 - [macOS 发行包](#23-macos-安装发行包)
 - [Windows 发行包](#24-windows-安装发行包)
-- [源码安装（当前可用）](#25-从源码安装所有平台)
+- [源码安装](#25-从源码安装所有平台)
 - [Linux systemd 安装](#26-linux-systemd-安装)
 - [验证与常见问题](#27-安装验证与常见问题)
 - [443 端口权限](#28-监听-443-的权限)
@@ -56,9 +56,9 @@
 `server`、`agent` 和 `console`，无需分别下载服务端和客户端，也无需 Node.js 或 Python。
 
 - 下载入口：[Wrste/divertlink Releases](https://github.com/Wrste/divertlink/releases)。
-- **当前仓库尚无 Release**，请先使用 [2.5 从源码安装](#25-从源码安装所有平台)；
-  下方发行包命令适用于对应版本正式发布之后，不会自动触发发布。
-- 命令中的 `0.1.0` 是版本示例，执行前应在 Releases 确认该版本和资产存在。
+- [v0.1.0](https://github.com/Wrste/divertlink/releases/tag/v0.1.0) 已提供以下 Linux/macOS
+  安装包；Windows 包尚未发布，请先使用 [2.5 从源码安装](#25-从源码安装所有平台)。
+- 命令中的 `0.1.0` 对应本次发布，升级时在 Releases 确认新版本和资产存在。
   下载 URL 的标签带 `v`（如 `v0.1.0`），文件名的版本不带 `v`。
 
 | 操作系统 / CPU | Release 资产（`<version>` 替换为实际版本） |
@@ -67,7 +67,7 @@
 | Linux ARM 64 位（`aarch64` / `arm64`） | `divertlink-<version>-aarch64-unknown-linux-musl.tar.gz` |
 | macOS Apple Silicon（M 系列，`arm64`） | `divertlink-<version>-aarch64-apple-darwin.tar.gz` |
 | macOS Intel（`x86_64`） | `divertlink-<version>-x86_64-apple-darwin.tar.gz` |
-| Windows Intel / AMD 64 位 | `divertlink-<version>-x86_64-pc-windows-msvc.zip` |
+| Windows Intel / AMD 64 位（预构建包待发布） | `divertlink-<version>-x86_64-pc-windows-msvc.zip` |
 
 每个压缩包另有同名 `.sha256` 文件。**压缩包内还有一层同名目录**，二进制不在
 解压目录根部。32 位 Linux/Windows、Windows ARM64 暂无预构建资产；源码构建也需
@@ -164,6 +164,9 @@ DMG 已附加公证票据，适合离线验证；tar.gz 中为同一签名二进
 维护者需要构建可直接运行的 Linux/macOS 发布包时，参见[构建、签名与公证](releasing.md)。
 
 ### 2.4 Windows 安装发行包
+
+本次 v0.1.0 尚未附带 Windows 资产，请先按[源码安装](#25-从源码安装所有平台)构建。
+以下命令供 Windows 发行包发布后使用。
 
 适用于 64 位 Intel / AMD Windows。在「设置 → 系统 → 系统信息」确认系统类型，
 打开 **PowerShell 5.1 或更新版本**，无需管理员权限。下面安装到
@@ -275,7 +278,13 @@ rustup 官方方式安装即可。编译遇到网络超时请检查 crates.io �
 systemd 的环境应使用上述手工安装。需先取得完整仓库，因为脚本会读取
 `deploy/systemd/` 中的服务模板，不能只下载 `install.sh` 单个文件执行。
 
-在克隆的仓库根目录运行；目前没有 Release 时，先完成上一节源码构建，再离线安装：
+在克隆的仓库根目录运行，可直接下载已发布的版本：
+
+```bash
+sudo ./deploy/install.sh --server --version 0.1.0 --domain gateway.example.com
+```
+
+若已完成上一节源码构建，也可离线安装：
 
 ```bash
 # 网关：安装本地编译好的二进制，并生成配置与自签证书
