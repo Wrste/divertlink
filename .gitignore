@@ -31,3 +31,6 @@
 Thumbs.db
 .idea/
 .vscode/
+
+# local deploy key for pushing to GitHub (never commit)
+/.deploy/
