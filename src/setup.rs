@@ -122,14 +122,14 @@ pub fn init_project(opts: &InitOptions) -> Result<InitReport> {
         }
         if let Some(report) = &report {
             text = text.replace("# pin = \"\"", &format!("pin = \"{}\"", report.server_pin));
-            if let (Some(cert), Some(key)) = (&report.client_cert, &report.client_key) {
+            if report.client_cert.is_some() && report.client_key.is_some() {
                 text = text.replace(
                     "# client_cert = \"certs/client.crt\"",
-                    &format!("client_cert = \"{}\"", cert.display()),
+                    "client_cert = \"certs/client.crt\"",
                 );
                 text = text.replace(
                     "# client_key = \"certs/client.key\"",
-                    &format!("client_key = \"{}\"", key.display()),
+                    "client_key = \"certs/client.key\"",
                 );
             }
         }

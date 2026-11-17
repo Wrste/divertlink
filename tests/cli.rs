@@ -89,7 +89,18 @@ fn init_generates_working_configs_and_certs() {
     let agent_toml = std::fs::read_to_string(dir.join("agent.toml")).unwrap();
     assert!(agent_toml.contains("ca = \"certs/ca.crt\""), "{agent_toml}");
     assert!(agent_toml.contains("pin = \""), "{agent_toml}");
-    assert!(agent_toml.contains("client_cert"), "{agent_toml}");
+    let mut parsed = divertlink::config::AgentConfig::from_toml_str(&agent_toml).unwrap();
+    assert_eq!(
+        parsed.tls.client_cert.as_deref(),
+        Some(Path::new("certs/client.crt"))
+    );
+    assert_eq!(
+        parsed.tls.client_key.as_deref(),
+        Some(Path::new("certs/client.key"))
+    );
+    parsed.resolve_paths(&dir);
+    assert!(parsed.tls.client_cert.unwrap().is_file());
+    assert!(parsed.tls.client_key.unwrap().is_file());
 
     // Key material must not be world readable.
     #[cfg(unix)]
