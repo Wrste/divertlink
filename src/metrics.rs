@@ -83,6 +83,8 @@ pub struct Metrics {
     pub stream_errors: AtomicU64,
     /// Heartbeats that timed out and forced a reconnect.
     pub heartbeat_timeouts: AtomicU64,
+    /// Sessions replaced by a newer agent session (reconnect/flapping).
+    pub session_replacements: AtomicU64,
     /// Agent reconnect attempts (agent side, exported by gateway for ops only if reported).
     pub reconnects: AtomicU64,
     /// Total public requests.
@@ -112,6 +114,7 @@ impl Metrics {
             tunnel_unavailable: AtomicU64::new(0),
             stream_errors: AtomicU64::new(0),
             heartbeat_timeouts: AtomicU64::new(0),
+            session_replacements: AtomicU64::new(0),
             reconnects: AtomicU64::new(0),
             requests_total: AtomicU64::new(0),
             bytes_in: AtomicU64::new(0),
@@ -174,7 +177,7 @@ impl Metrics {
             let _ = writeln!(out, "{name} {}", value.load(Ordering::Relaxed));
         }
 
-        let counters: [(&str, &str, &AtomicU64); 9] = [
+        let counters: [(&str, &str, &AtomicU64); 10] = [
             (
                 "divertlink_tunnel_connections_total",
                 "Total tunnel connections",
@@ -219,6 +222,11 @@ impl Metrics {
                 "divertlink_heartbeat_timeouts_total",
                 "Heartbeat timeouts",
                 &self.heartbeat_timeouts,
+            ),
+            (
+                "divertlink_session_replacements_total",
+                "Agent sessions replaced by a newer connection",
+                &self.session_replacements,
             ),
         ];
         for (name, help, value) in counters {

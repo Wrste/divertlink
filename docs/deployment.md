@@ -171,7 +171,7 @@ curl -sS https://llm.example.com/home/v1/models \
 ```bash
 # 依赖：bash、curl、python3
 ./scripts/smoke.sh -b /usr/local/bin/divertlink
-# 输出形如：冒烟测试通过：14 项检查全部成功
+# 输出形如：冒烟测试通过：15 项检查全部成功
 ```
 
 覆盖项：OpenAI 兼容非流式请求、`GET /v1/models`、SSE 逐块实时到达（无缓冲）、
@@ -180,6 +180,28 @@ curl -sS https://llm.example.com/home/v1/models \
 失败时会打印 gateway/agent/mock 上游日志；加 `-k` 可保留临时目录用于排查。
 
 ---
+
+### 2.6 图形控制台（可选，推荐用于第一次上手）
+
+不想手改 TOML 时，可以用内置控制台在浏览器里完成配置与启停：
+
+```bash
+divertlink console --open      # 打开 http://127.0.0.1:17653/
+```
+
+- 「＋ 新建项目」生成双端配置与证书，并自动登记为 profile；
+- 选中配置点「启动」，日志、在线隧道、流量、证书有效期都在同一界面；
+- 「连接探测」可验证 agent → 网关的 TLS 握手与 SPKI pin；
+- 控制台**只监听回环地址**，是交互式管理工具，不替代 systemd/Docker 常驻托管；
+  远程使用 `ssh -L 17653:127.0.0.1:17653 user@gateway` 本地转发即可。
+
+Windows / macOS / Linux 双击启动脚本见 `scripts/desktop/`，浏览器里还可「安装」为
+PWA 桌面应用。完整说明（含安全模型与参考的开源 UI 项目）见
+[图形化客户端](console.md)。
+
+> 长期运行仍然使用 systemd（Linux）或 Windows 服务（如
+> `nssm install divertlink "C:\divertlink\divertlink.exe" agent -c "C:\divertlink\agent.toml"`）；
+> 控制台进程退出时，由它启动的子进程也会一起停止。
 
 ## 3. 三种拓扑
 

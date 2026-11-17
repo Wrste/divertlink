@@ -16,6 +16,7 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 - [特性](#特性)
 - [架构](#架构)
 - [30 秒快速开始](#30-秒快速开始)
+- [图形化客户端](#图形化客户端内置控制台)
 - [命令行速查](#命令行速查)
 - [接入 new-api / one-api](#接入-new-api--one-api)
 - [安全摘要](#安全摘要)
@@ -45,6 +46,9 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 - **new-api 友好**：三种组合方式——new-api 把网关配成渠道、网关静态路由反代
   new-api、agent 指向家庭端 new-api。
 - **可观测**：`/healthz`、`/readyz`、`/metrics`（Prometheus）、`/status`（隧道快照）。
+- **多平台图形客户端**：内置 Web 控制台（`divertlink console`），零依赖、单二进制，
+  Windows/macOS/Linux 用浏览器或安装为 PWA 桌面应用；管理多套配置、一键启停、实时日志、
+  流量看板、TLS/证书探测与在线编辑配置。参考 [docs/console.md](docs/console.md)。
 
 ## 架构
 
@@ -104,6 +108,16 @@ curl -N -sS https://gateway.example.com/home/v1/chat/completions \
 公网 CA 证书并绑定域名。完整的前置条件、防火墙、systemd 托管与验证见
 [快速开始](docs/quickstart.md)。
 
+### 不想敲命令？用控制台
+
+```bash
+divertlink console --open      # 打开 http://127.0.0.1:17653/
+```
+
+在控制台里「＋ 新建项目」→ 填域名/目录 → 一键生成双端配置与证书，然后选中配置点
+「启动」即可；实时日志、在线隧道、流量、证书有效期都在一个窗口里。详见
+[图形化客户端](docs/console.md)。
+
 ### 端到端冒烟验证（可选）
 
 仓库自带 `scripts/smoke.sh`，一条命令即可在临时环境跑通整条链路：自动 `init` 生成双端
@@ -121,6 +135,29 @@ DIVERTLINK_BIN=/usr/local/bin/divertlink ./scripts/smoke.sh   # 也支持环境�
 在 `mktemp` 临时目录中运行，退出（含失败）时自动清理进程与临时目录，不会占用或影响本机
 已有服务；找不到二进制时先 `cargo build` 或使用 `-b` 指定。
 
+## 图形化客户端（内置控制台）
+
+DivertLink 自带跨平台图形界面：`divertlink console` 启动一个只监听 127.0.0.1 的本地
+Web 控制台（编进同一个二进制，无需 Node/Electron/Tauri），浏览器打开即是 UI，也可以
+「安装」成 PWA 桌面应用；Windows/macOS/Linux 桌面启动脚本见
+`scripts/desktop/`。
+
+![DivertLink 控制台：运行中的网关与在线隧道](docs/images/console.png)
+
+它解决了日常最烦的三件事：
+
+- **多套配置**一眼看清状态，一键启动/停止/重启，子进程日志实时滚动；
+- **在线隧道 / 请求量 / 流量 / 失败数**卡片，来自网关 `/status` 与 Prometheus 指标；
+- **TLS 连接探测**：延迟、协议版本、证书有效期与 SPKI pin，复制即可填进 agent 配置。
+
+```bash
+divertlink console --open
+```
+
+安全默认：仅回环监听；绑定非回环地址必须 `--token`；写操作要求自定义请求头（防 CSRF）；
+不返回任何 CORS 头。远程管理请用 SSH 端口转发。完整说明（含与 cc-switch 等开源项目
+的 UI 参考关系、PWA 安装、远程访问、导入导出）见 [docs/console.md](docs/console.md)。
+
 ## 命令行速查
 
 ```text
@@ -129,7 +166,8 @@ divertlink agent     [-c agent.toml]  [--check] [--once]
 divertlink init      [--role server|agent|both] [--dir .] [--domain example.com] [--mtls] [--force]
 divertlink gen-certs [--dir certs] [--domain ...] [--self-signed] [--client] [--force]
 divertlink token     [--prefix dlk_] [--count 1] [--bytes 24]
-divertlink check     -c config.toml
+divertlink check     -c config.toml [--strict]
+divertlink console   [--listen 127.0.0.1:17653] [--open] [--token TOKEN]
 divertlink version
 ```
 
@@ -140,7 +178,8 @@ divertlink version
 | `init` | 生成双端配置与证书并打印 next steps；`--mtls` 额外生成客户端证书；`--force` 覆盖已有文件；`--role agent` 不生成证书 |
 | `gen-certs` | 生成 CA / 服务端 / 客户端证书并输出 SPKI pin；`--self-signed` 只生成自签服务端证书；`--client` 供 mTLS 使用 |
 | `token` | 生成随机 API Key / 隧道令牌，`--count` 批量生成，`--bytes` 控制随机字节数 |
-| `check` | 校验配置文件（按内容自动区分 server 与 agent） |
+| `check` | 校验配置文件（按内容自动区分 server 与 agent）；默认打印安全告警，`--strict` 把告警视为错误 |
+| `console` | 启动内置图形控制台（本地 Web UI / PWA）；`--open` 自动打开浏览器，`--token` 保护非回环监听 |
 | `version` | 打印版本信息 |
 
 常用环境变量：`DIVERTLINK_CONFIG`（`server` / `agent` 的 `-c` 默认值）；agent 侧
@@ -216,6 +255,7 @@ curl -sS  http://127.0.0.1:9090/metrics   # Prometheus 文本指标
 | [性能与容量](docs/performance.md) | 性能设计、容量估算、压测方法、调优参数、常见瓶颈 |
 | [故障排查](docs/troubleshooting.md) | 按状态码与症状排查（401/403/404/413/429/502/503/504、SSE 缓冲、心跳、TLS、ALPN、NAT） |
 | [常见问题](docs/faq.md) | 与 frp/Cloudflare Tunnel 的区别、Ollama、Windows、多模型、域名、mTLS 等 |
+| [图形化客户端](docs/console.md) | 内置控制台：多配置管理、一键启停、实时日志、流量看板、TLS/证书探测、PWA、远程访问与安全模型 |
 | [部署文档](docs/deployment.md) | Docker/Compose、systemd、nginx/Caddy、证书获取、升级回滚 |
 | [示例配置](examples/README.md) | 可直接运行的双端示例与三端拓扑 |
 | [设计说明（内部契约）](docs/DESIGN.md) | 架构与接口契约，面向实现者与贡献者 |
@@ -231,6 +271,7 @@ cargo build --release --locked          # 产物：target/release/divertlink
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+cargo run -- console --open   # 内置图形控制台（可选）
 ```
 
 本仓库已内置本地工具链时，可先执行 `. ./scripts/env.sh` 再运行 cargo 命令。

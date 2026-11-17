@@ -179,6 +179,55 @@ fn gen_certs_self_signed_and_force() {
 }
 
 #[test]
+fn check_reports_warnings_and_supports_strict() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir = tmp.path().join("proj");
+    run_ok(&[
+        "init",
+        "--role",
+        "both",
+        "--dir",
+        dir.to_str().unwrap(),
+        "--domain",
+        "localhost",
+        "--force",
+    ]);
+    let server = dir.join("server.toml");
+    let out = run_ok(&["check", "-c", server.to_str().unwrap()]);
+    assert!(out.contains("no security warnings"), "{out}");
+    assert!(run(&["check", "-c", server.to_str().unwrap(), "--strict"])
+        .status
+        .success());
+
+    // A weak placeholder config must produce warnings and fail under --strict.
+    let weak = dir.join("weak.toml");
+    std::fs::write(
+        &weak,
+        r#"
+[server]
+tunnel_listen = "off"
+ingress_listen = "off"
+[[api_keys]]
+name = "weak"
+key = "short"
+[[tunnels]]
+id = "home"
+token = "weak"
+mount = "/home"
+"#,
+    )
+    .unwrap();
+    let output = run(&["check", "-c", weak.to_str().unwrap()]);
+    assert!(output.status.success(), "warnings alone must not fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("warning:"), "{stderr}");
+    let output = run(&["check", "-c", weak.to_str().unwrap(), "--strict"]);
+    assert!(!output.status.success(), "--strict must fail on warnings");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("treated as errors"));
+    assert!(!output.stdout.is_empty());
+}
+
+#[test]
 fn check_rejects_bad_configs() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("bad.toml");
@@ -231,9 +280,41 @@ fn missing_config_is_reported() {
 }
 
 #[test]
+fn broken_pipe_is_tolerated() {
+    // `divertlink token --count 500 | head -n 1` must exit cleanly even though the
+    // reader closes the pipe early (a classic CLI robustness edge case).
+    use std::io::BufRead;
+    use std::process::Stdio;
+    let mut child = Command::new(bin())
+        .args(["token", "--count", "500"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let stdout = child.stdout.take().unwrap();
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut first = String::new();
+        reader.read_line(&mut first).unwrap();
+        assert!(first.starts_with("dlk_"), "{first}");
+        // Dropping the reader closes the pipe while the child is still writing.
+    }
+    let status = child.wait().unwrap();
+    assert!(status.success(), "broken pipe must not error: {status:?}");
+}
+
+#[test]
 fn help_mentions_subcommands() {
     let out = run_ok(&["--help"]);
-    for cmd in ["server", "agent", "init", "gen-certs", "token", "check"] {
+    for cmd in [
+        "server",
+        "agent",
+        "console",
+        "init",
+        "gen-certs",
+        "token",
+        "check",
+    ] {
         assert!(out.contains(cmd), "help is missing {cmd}: {out}");
     }
     let _ = Path::new(bin());

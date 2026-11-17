@@ -144,6 +144,16 @@ one-api 同理：OpenAI 类型渠道通常填不带 `/v1` 的根地址（「Open
 普通 HTTP/1.1 与 HTTP/2 的请求/响应（含 SSE）不受影响：公网入口支持 `h2` 与
 `http/1.1`，只是隧道内部统一为 HTTP/1.1 语义。
 
+## 10.5 有图形界面 / 桌面客户端吗？
+
+有。`divertlink console --open` 启动内置控制台（本地 Web UI，编进同一个二进制，无需
+Node/Electron/Tauri）：多套配置管理、一键启停、实时日志、流量看板、TLS/证书探测、
+在线编辑配置；浏览器可「安装」为 PWA 桌面应用，`scripts/desktop/` 另提供
+Windows/macOS/Linux 双击启动脚本。UI 参考了 cc-switch / cc-switch-web /
+frpc-desktop 等开源项目。详见 [图形化客户端](console.md)。
+
+> 控制台默认只监听 127.0.0.1，是本地管理工具，不替代 systemd/Docker 的常驻托管。
+
 ## 11. Windows 能部署吗？
 
 可以。DivertLink 是单二进制，CI 产物包含 Windows x86_64 版本：

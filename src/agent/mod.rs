@@ -64,6 +64,9 @@ pub fn build_state(config: AgentConfig) -> Result<Arc<AgentState>> {
     if config.tls.client_cert.is_some() {
         info!("agent will present a client certificate for mutual TLS");
     }
+    for warning in config.lint() {
+        warn!("config warning: {warning}");
+    }
     if config.agent.heartbeat_mode == crate::config::HeartbeatMode::None {
         warn!("heartbeat_mode = none: dead tunnels may take minutes to be detected");
     }
@@ -179,9 +182,7 @@ async fn supervisor(state: Arc<AgentState>, shutdown: CancellationToken) {
 pub async fn run_until_signal(config: AgentConfig) -> Result<()> {
     let handle = run(config, None).await?;
     info!("divertlink agent running; press Ctrl-C to stop");
-    tokio::signal::ctrl_c()
-        .await
-        .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
+    crate::signal::shutdown_signal().await;
     info!("shutdown signal received");
     handle.shutdown().await;
     Ok(())

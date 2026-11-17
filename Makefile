@@ -60,6 +60,9 @@ ci: check ## CI 等价检查
 deploy-check: ## 校验部署资产（YAML/install.sh/compose/systemd/nginx 契约）
 	bash deploy/check-assets.sh
 
+console: build ## 启动内置图形控制台（本地 Web UI / PWA）
+	$(CARGO_RUN) run --locked -- console --open
+
 smoke: build ## 端到端冒烟测试（init -> mock 上游 -> gateway + agent -> curl 验证）
 	./scripts/smoke.sh -b ./target/debug/divertlink
 

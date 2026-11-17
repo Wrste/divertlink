@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>DivertLink · LLM 隧道控制台</title>
+  <meta name="description" content="DivertLink 控制台：把家庭宽带上的大模型服务安全映射到固定公网 IP。" />
+  <meta name="theme-color" content="#0b1120" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app" class="app" data-theme="auto">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <img class="brand-logo" src="/icon.svg" alt="" />
+        <div class="brand-text">
+          <strong>DivertLink</strong>
+          <span>LLM 隧道控制台</span>
+        </div>
+        <button class="icon-btn only-mobile" id="sidebar-close" title="关闭">✕</button>
+      </div>
+
+      <div class="search">
+        <input id="search" type="search" placeholder="搜索配置…（/）" autocomplete="off" />
+      </div>
+
+      <div class="profile-list" id="profile-list"></div>
+
+      <div class="sidebar-actions">
+        <button class="btn primary block" id="btn-new">＋ 新建项目</button>
+        <button class="btn block" id="btn-add">添加已有配置</button>
+        <div class="sidebar-footer">
+          <button class="link" id="btn-import">导入</button>
+          <span>·</span>
+          <button class="link" id="btn-export">导出</button>
+          <span>·</span>
+          <button class="link" id="btn-theme">主题</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn only-mobile" id="sidebar-open" title="菜单">☰</button>
+        <div class="title-block">
+          <h1 id="profile-title">未选择配置</h1>
+          <div class="subtitle" id="profile-subtitle">从左侧选择或新建一个配置</div>
+        </div>
+        <div class="topbar-actions" id="topbar-actions">
+          <span class="status-pill" id="status-pill" data-state="stopped"><i></i><span>未运行</span></span>
+          <button class="btn" id="btn-start">启动</button>
+          <button class="btn" id="btn-stop">停止</button>
+          <button class="btn" id="btn-restart">重启</button>
+          <button class="icon-btn" id="btn-delete" title="删除配置">🗑</button>
+        </div>
+      </header>
+
+      <div class="content" id="content">
+        <section class="empty-state" id="empty-state">
+          <img src="/icon.svg" alt="" class="empty-logo" />
+          <h2>欢迎使用 DivertLink</h2>
+          <p>把家庭宽带上的 vLLM / Ollama / new-api 安全映射到固定公网 IP 的服务器。</p>
+          <div class="empty-actions">
+            <button class="btn primary" id="btn-new-2">新建双端项目</button>
+            <button class="btn" id="btn-add-2">添加已有配置</button>
+          </div>
+          <p class="hint">提示：这是<i>本地</i>控制台，仅监听 127.0.0.1；公网入口由网关的 443 端口提供服务。</p>
+        </section>
+
+        <section class="grid" id="cards" hidden>
+          <article class="card" id="card-overview">
+            <header class="card-head"><h3>概览</h3><span class="card-tag" id="overview-role"></span></header>
+            <dl class="kv" id="overview-kv"></dl>
+          </article>
+
+          <article class="card" id="card-live">
+            <header class="card-head">
+              <h3>实时状态</h3>
+              <span class="muted" id="live-refreshed"></span>
+            </header>
+            <div class="metrics" id="live-metrics"></div>
+            <div id="live-tunnels" class="tunnels"></div>
+          </article>
+
+          <article class="card" id="card-probe">
+            <header class="card-head"><h3>连接探测</h3><button class="btn small" id="btn-probe">开始探测</button></header>
+            <div id="probe-result" class="probe muted">检测 TLS 握手、延迟、证书有效期与 SPKI pin。</div>
+          </article>
+
+          <article class="card full" id="card-config">
+            <header class="card-head">
+              <h3>配置文件</h3>
+              <div class="row">
+                <button class="btn small" id="btn-token">生成密钥</button>
+                <button class="btn small primary" id="btn-save-config">保存</button>
+              </div>
+            </header>
+            <div class="config-path muted" id="config-path"></div>
+            <textarea id="config-editor" spellcheck="false" rows="16"></textarea>
+            <div class="config-msg" id="config-msg"></div>
+          </article>
+
+          <article class="card full" id="card-logs">
+            <header class="card-head">
+              <h3>实时日志</h3>
+              <div class="row">
+                <label class="check"><input type="checkbox" id="log-autoscroll" checked /> 自动滚动</label>
+                <label class="check"><input type="checkbox" id="log-pause" /> 暂停</label>
+                <button class="btn small" id="btn-clear-logs">清屏</button>
+              </div>
+            </header>
+            <div class="logs" id="logs"></div>
+          </article>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- New project modal -->
+  <div class="modal" id="modal-new" hidden>
+    <div class="modal-box">
+      <header class="modal-head"><h2>新建项目</h2><button class="icon-btn" data-close>✕</button></header>
+      <div class="modal-body">
+        <label class="field">
+          <span>项目目录</span>
+          <input id="new-dir" placeholder="/home/alice/divertlink" />
+        </label>
+        <label class="field">
+          <span>公网域名或 IP（证书 SAN / agent 连接地址）</span>
+          <input id="new-domain" placeholder="llm.example.com" />
+        </label>
+        <label class="field">
+          <span>生成内容</span>
+          <select id="new-role">
+            <option value="both">双端（网关 + 家庭端，单机体验）</option>
+            <option value="server">仅网关 Gateway</option>
+            <option value="agent">仅家庭端 Agent</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="new-mtls" /> 生成 mTLS 客户端证书</label>
+        <label class="check"><input type="checkbox" id="new-force" /> 覆盖已存在的文件</label>
+        <p class="hint" id="new-hint">将生成 server.toml、agent.toml 与 certs/，并自动加入左侧列表。</p>
+        <div class="modal-msg" id="new-msg"></div>
+      </div>
+      <footer class="modal-foot">
+        <button class="btn" data-close>取消</button>
+        <button class="btn primary" id="btn-create">生成</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Add existing config modal -->
+  <div class="modal" id="modal-add" hidden>
+    <div class="modal-box">
+      <header class="modal-head"><h2>添加已有配置</h2><button class="icon-btn" data-close>✕</button></header>
+      <div class="modal-body">
+        <label class="field"><span>显示名称</span><input id="add-name" placeholder="家里的 vLLM" /></label>
+        <label class="field"><span>配置路径（server.toml 或 agent.toml）</span><input id="add-path" placeholder="/etc/divertlink/agent.toml" /></label>
+        <label class="check"><input type="checkbox" id="add-autostart" /> 控制台启动时自动启动</label>
+        <div class="modal-msg" id="add-msg"></div>
+      </div>
+      <footer class="modal-foot">
+        <button class="btn" data-close>取消</button>
+        <button class="btn primary" id="btn-add-save">添加</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Result modal (init output) -->
+  <div class="modal" id="modal-result" hidden>
+    <div class="modal-box">
+      <header class="modal-head"><h2>已生成</h2><button class="icon-btn" data-close>✕</button></header>
+      <div class="modal-body" id="result-body"></div>
+      <footer class="modal-foot"><button class="btn primary" data-close>完成</button></footer>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

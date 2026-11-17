@@ -1,0 +1,18 @@
+{
+  "name": "DivertLink 控制台",
+  "short_name": "DivertLink",
+  "description": "把家庭宽带上的大模型服务安全映射到固定公网 IP",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1120",
+  "theme_color": "#0b1120",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

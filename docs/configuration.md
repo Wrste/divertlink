@@ -62,6 +62,7 @@
 | `http_listen` | string(地址) \| `"off"` | `"127.0.0.1:8080"` | 可选 | 明文 HTTP 入口，供本机 nginx/Caddy 终止 TLS 后回源。**不要监听公网地址**；`"off"`/`false` 关闭 |
 | `admin_listen` | string(地址) \| `"off"` | `"127.0.0.1:9090"` | 可选 | 管理端点 `/healthz`、`/readyz`、`/metrics`、`/status`。只应监听回环地址；`"off"`/`false` 关闭 |
 | `trust_proxy` | boolean | `false` | 可选 | 是否采信 `X-Forwarded-For` / `X-Real-IP` 作为客户端 IP。仅当网关前面是可信的本机/内网反向代理时开启；公网直连时开启会被伪造头绕过 `allow_ips` |
+| `shutdown_grace` | string(时长) | `"10s"` | 可选 | 优雅退出时等待在途请求/SSE 排空的最长时间；收到 SIGTERM/Ctrl-C 后不再接受新连接 |
 
 > 关闭监听示例：`admin_listen = "off"`、`http_listen = false`。若只想换端口，直接
 > 写其他回环地址/端口（例如 `admin_listen = "127.0.0.1:19090"`）。
@@ -109,6 +110,8 @@
 | `header_read_timeout` | string(时长) | `"10s"` | 可选 | 读取客户端请求头的超时，已接入入口/管理/agent 数据流的 HTTP 读头超时；防止慢速头攻击（Slowloris） |
 | `max_streams_per_tunnel` | integer | `256` | 可选 | 每条隧道默认的并发流上限；`[[tunnels]].max_streams` 未设置时继承该值 |
 | `max_connections` | integer | `1024` | 可选 | **每个监听器**各自的并发连接上限（TLS 隧道/入口、明文入口、管理端点分别计数），不是全进程总数 |
+| `allowed_methods` | array[string] | `["GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"]` | 可选 | 入口允许的 HTTP 方法；不在列表中的方法（如 `TRACE`/`CONNECT`）直接返回 405，并带 `Allow` 头。严格场景可收窄到 `["GET","POST"]` |
+| `global_rate_limit` | string(速率) | 无（不限） | 可选 | **网关全局**令牌桶限流（如 `"3000/min"`），在认证之前执行，用于整体过载保护；超限返回 429 + `Retry-After`。与 `[[api_keys]].rate_limit` 独立叠加 |
 
 ### 2.4 `[log]`
 
@@ -263,7 +266,10 @@
 
 ## 5. 校验规则
 
-`divertlink check -c <file>` 与 `divertlink server|agent -c <file> --check` 会执行以下
+`divertlink check -c <file>` 在通过校验后还会输出**安全/健壮性告警**（弱令牌、占位符密钥、
+TLS 1.2、管理端点监听非回环、`require_auth = false` 的静态路由指向非内网地址、
+证书即将过期等），告警不影响退出码；加 `--strict` 时告警会视为错误（退出非零），适合
+CI/上线门禁。`divertlink server|agent -c <file> --check` 会执行以下
 跨字段校验（失败时输出具体字段并退出非零）。`check` 按内容启发式判断类型：文件含
 `[agent]` 且不含 `[server]` 时按 agent 配置校验，否则按 server 配置校验。
 

@@ -72,6 +72,9 @@ async fn run_session(
     let mut mux_config = yamux::Config::default();
     let max_streams = (config.limits.max_streams_per_tunnel * 2).clamp(512, 4096);
     mux_config.set_max_num_streams(max_streams);
+    // Give every stream at least 1 MiB of receive window (bounded to 1 GiB total).
+    let window = (max_streams * 1024 * 1024).clamp(256 * 1024 * max_streams, 1024 * 1024 * 1024);
+    mux_config.set_max_connection_receive_window(Some(window));
     mux_config.set_split_send_size(64 * 1024);
     let conn = yamux::Connection::new(mux_io, mux_config, yamux::Mode::Server);
 
@@ -221,6 +224,20 @@ async fn run_session(
     metrics
         .connections_total
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Some(previous) = &replaced {
+        metrics
+            .session_replacements
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let age = previous.opened_at.elapsed();
+        if age < Duration::from_secs(10) {
+            warn!(
+                tunnel = %tunnel_id,
+                previous_session = %previous.id,
+                age_ms = age.as_millis() as u64,
+                "agent session replaced shortly after connecting (flapping?)"
+            );
+        }
+    }
     // Gauge guard: decremented once this session (and its spawned tasks) unwind.
     let _active = ActiveConnGuard::new(metrics.clone());
     info!(

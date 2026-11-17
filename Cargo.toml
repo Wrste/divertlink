@@ -3,11 +3,12 @@ name = "divertlink"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.88"
-description = "DivertLink - a secure, high-performance LLM reverse tunnel for exposing home-hosted models behind a fixed public IP"
+description = "DivertLink - a secure, high-performance LLM reverse tunnel for exposing home-hosted models behind a fixed public IP, with a built-in cross-platform web console"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/divertlink/divertlink"
 readme = "README.md"
 keywords = ["llm", "reverse-proxy", "tunnel", "openai", "anthropic"]
+# Built-in GUI lives in `console` (embedded static assets); no extra runtime needed.
 categories = ["network-programming", "command-line-utilities"]
 
 [dependencies]
@@ -36,7 +37,8 @@ sha2 = "0.10"
 socket2 = { version = "0.6.5", features = ["all"] }
 subtle = "2.6.1"
 thiserror = "2.0.21"
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal", "fs"] }
+time = { version = "0.3.55", features = ["formatting"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal", "fs", "process"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "logging", "tls12"] }
 tokio-util = { version = "0.7.20", features = ["compat", "rt"] }
 toml = "1.2.1"
@@ -55,3 +57,6 @@ tokio = { version = "1.54.1", features = ["test-util", "macros", "rt-multi-threa
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

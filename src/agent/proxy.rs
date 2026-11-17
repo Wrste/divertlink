@@ -139,6 +139,8 @@ async fn handle_request(
     };
 
     let (parts, incoming) = response.into_parts();
+    let mut response_headers = sanitize_response_headers(&parts.headers);
+    crate::httpfwd::apply_stream_headers(&mut response_headers);
     debug!(
         request_id = %request_id,
         path = %path,
@@ -152,7 +154,7 @@ async fn handle_request(
     }
     let mut response = Response::new(stream_body(incoming, stats));
     *response.status_mut() = parts.status;
-    *response.headers_mut() = sanitize_response_headers(&parts.headers);
+    *response.headers_mut() = response_headers;
     if let Ok(value) = HeaderValue::from_str(&request_id) {
         response
             .headers_mut()

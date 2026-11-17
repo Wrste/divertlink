@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=DivertLink 控制台
+Name[en]=DivertLink Console
+Comment=管理 DivertLink 隧道（本地 Web 控制台）
+Comment[en]=Manage DivertLink tunnels (local web console)
+Exec=divertlink console --open
+Icon=network-transmit-receive
+Terminal=true
+Categories=Network;Utility;
+Keywords=divertlink;tunnel;llm;openai;anthropic;new-api;
+StartupNotify=false

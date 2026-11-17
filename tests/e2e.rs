@@ -1297,3 +1297,76 @@ async fn http2_ingress_works() {
     assert_eq!(value["data"][0]["id"], "mock-model");
     rig.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn method_allowlist_and_global_rate_limit() {
+    // Only GET/POST allowed, gateway-wide rate limit of 2 requests per minute.
+    let (rig, _upstream) = new_rig(|builder| {
+        builder.server_config.limits.allowed_methods = vec!["GET".to_string(), "POST".to_string()];
+        builder.server_config.limits.global_rate_limit = Some("2/min".to_string());
+    })
+    .await;
+
+    // TRACE is not in the allow list and must be rejected before authentication.
+    let request = Request::builder()
+        .method("TRACE")
+        .uri(rig.https_url("/home/v1/models"))
+        .body(Body::empty())
+        .unwrap();
+    let response = rig.client.request(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    let allow = response
+        .headers()
+        .get(header::ALLOW)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(allow.contains("GET") && allow.contains("POST"), "{allow}");
+
+    // The global limiter allows the first two requests, then returns 429.
+    let (status, _, _) = rig
+        .get("/home/v1/models", Some("Bearer dlk_test_key"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = rig
+        .get("/home/v1/models", Some("Bearer dlk_test_key"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, headers, _) = rig
+        .get("/home/v1/models", Some("Bearer dlk_test_key"))
+        .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(headers.contains_key(header::RETRY_AFTER));
+    rig.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn sse_responses_are_marked_unbuffered() {
+    let (rig, _upstream) = new_rig(|_| {}).await;
+    let request = Request::builder()
+        .method("POST")
+        .uri(rig.https_url("/home/v1/chat/completions"))
+        .header("authorization", "Bearer dlk_test_key")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&json!({"model": "mock-model", "stream": true})).unwrap(),
+        ))
+        .unwrap();
+    let response = rig.client.request(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-accel-buffering").unwrap(),
+        "no",
+        "SSE responses must tell proxies not to buffer"
+    );
+    let cache_control = response
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(cache_control.contains("no-transform"), "{cache_control}");
+    let _ = response.into_body().collect().await.unwrap();
+    rig.shutdown().await;
+}

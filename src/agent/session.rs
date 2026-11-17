@@ -182,6 +182,13 @@ pub async fn run_session(state: Arc<AgentState>, shutdown: CancellationToken) ->
     }
     let heartbeat_timeout = heartbeat_timeout.max(heartbeat_interval * 3);
 
+    if config.agent.max_inflight as u32 > max_streams {
+        warn!(
+            max_inflight = config.agent.max_inflight,
+            gateway_max_streams = max_streams,
+            "agent.max_inflight exceeds the gateway stream limit; the gateway limit wins"
+        );
+    }
     info!(
         session = %session_id,
         tunnel = %config.agent.id,

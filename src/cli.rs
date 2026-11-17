@@ -1,12 +1,25 @@
 //! Command-line interface: `divertlink server|agent|init|gen-certs|token|check|version`.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use tracing::info;
 
 use crate::config::{AgentConfig, ServerConfig};
+
+/// Print a line to stdout, tolerating a closed pipe (`divertlink ... | head`).
+///
+/// Rust's `println!` panics with "failed printing to stdout: Broken pipe" when the
+/// reader goes away, which makes CLI tools unpleasant to pipe. We ignore write
+/// errors instead (standard Unix behaviour for `head`/`less` pipelines).
+macro_rules! outln {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout(), $($arg)*);
+    }};
+}
+
 use crate::error::{Error, Result};
 use crate::telemetry;
 use crate::tls::GenCertsOptions;
@@ -25,6 +38,7 @@ Examples:\n  \
 divertlink init --role both --domain llm.example.com\n  \
 divertlink server -c server.toml\n  \
 divertlink agent -c agent.toml\n  \
+divertlink console --open\n  \
 divertlink gen-certs --dir certs --domain llm.example.com --client"
 )]
 pub struct Cli {
@@ -48,6 +62,8 @@ pub enum Command {
     Token(TokenArgs),
     /// Validate a server or agent configuration file.
     Check(CheckArgs),
+    /// Run the built-in web console (cross-platform GUI in a browser/PWA).
+    Console(ConsoleArgs),
     /// Print version and build information.
     Version,
 }
@@ -148,12 +164,35 @@ pub struct TokenArgs {
     pub bytes: usize,
 }
 
+/// Arguments for `console`.
+#[derive(Debug, clap::Args)]
+pub struct ConsoleArgs {
+    /// Listen address (default 127.0.0.1:17653). Use 0 for a random free port.
+    #[arg(long, default_value = "127.0.0.1:17653")]
+    pub listen: String,
+    /// Access token required for the console API (mandatory for non-loopback).
+    #[arg(long, env = "DIVERTLINK_CONSOLE_TOKEN")]
+    pub token: Option<String>,
+    /// Open the UI in the default browser after startup.
+    #[arg(long)]
+    pub open: bool,
+    /// Override the profile store path.
+    #[arg(long)]
+    pub store: Option<std::path::PathBuf>,
+    /// Do not auto-start profiles marked with autostart.
+    #[arg(long)]
+    pub no_autostart: bool,
+}
+
 /// Arguments for `check`.
 #[derive(Debug, clap::Args)]
 pub struct CheckArgs {
     /// Configuration file to validate.
     #[arg(short, long, default_value = "server.toml")]
     pub config: PathBuf,
+    /// Treat security/robustness warnings as errors.
+    #[arg(long)]
+    pub strict: bool,
 }
 
 /// Entry point used by `main`.
@@ -185,16 +224,37 @@ pub fn run() -> Result<()> {
             }
             Ok(())
         }
+        Command::Console(args) => cmd_console(args),
         Command::Check(args) => cmd_check(args),
     }
 }
 
+fn cmd_console(args: ConsoleArgs) -> Result<()> {
+    let listen = args
+        .listen
+        .parse::<std::net::SocketAddr>()
+        .map_err(|e| Error::Config(format!("invalid --listen `{}`: {e}", args.listen)))?;
+    init_logging("info");
+    let runtime = build_runtime()?;
+    runtime.block_on(async move {
+        let options = crate::console::ConsoleOptions {
+            listen,
+            token: args.token,
+            open_browser: args.open,
+            store_path: args.store,
+            autostart: !args.no_autostart,
+        };
+        crate::console::run_until_signal(options).await
+    })
+}
+
 fn print_version() {
-    println!("divertlink {}", env!("CARGO_PKG_VERSION"));
-    println!("protocol: {}", crate::protocol::PROTOCOL_VERSION);
-    println!("os: {} {}", std::env::consts::OS, std::env::consts::ARCH);
-    println!("tls: rustls (ring), TLS 1.3");
-    println!("features: yamux multiplexing, SSE streaming, OpenAI/Anthropic/vLLM");
+    outln!("divertlink {}", env!("CARGO_PKG_VERSION"));
+    outln!("protocol: {}", crate::protocol::PROTOCOL_VERSION);
+    outln!("os: {} {}", std::env::consts::OS, std::env::consts::ARCH);
+    outln!("tls: rustls (ring), TLS 1.3");
+    outln!("features: yamux multiplexing, SSE streaming, OpenAI/Anthropic/vLLM");
+    outln!("console: built-in local web UI / PWA (divertlink console --open)");
 }
 
 fn init_logging(level: &str) {
@@ -213,8 +273,8 @@ fn cmd_server(args: ServerArgs) -> Result<()> {
         &config.log.level
     });
     if args.check {
-        println!("server configuration OK: {}", args.config.display());
-        println!(
+        outln!("server configuration OK: {}", args.config.display());
+        outln!(
             "  tunnels: {} | api keys: {} | static routes: {}",
             config.tunnels.len(),
             config.api_keys.len(),
@@ -241,10 +301,12 @@ fn cmd_agent(args: AgentArgs) -> Result<()> {
         &config.log.level
     });
     if args.check {
-        println!("agent configuration OK: {}", args.config.display());
-        println!(
+        outln!("agent configuration OK: {}", args.config.display());
+        outln!(
             "  tunnel: {} | gateway: {} | target: {}",
-            config.agent.id, config.agent.server, config.target.url
+            config.agent.id,
+            config.agent.server,
+            config.target.url
         );
         return Ok(());
     }
@@ -280,24 +342,24 @@ fn cmd_gen_certs(args: GenCertsArgs) -> Result<()> {
         self_signed: args.self_signed,
         force: args.force,
     })?;
-    println!("certificates written to {}", args.dir.display());
-    println!("  ca       : {}", report.ca_cert.display());
-    println!("  server   : {}", report.server_cert.display());
-    println!("  key      : {}", report.server_key.display());
+    outln!("certificates written to {}", args.dir.display());
+    outln!("  ca       : {}", report.ca_cert.display());
+    outln!("  server   : {}", report.server_cert.display());
+    outln!("  key      : {}", report.server_key.display());
     if let Some(client) = &report.client_cert {
-        println!("  client   : {}", client.display());
+        outln!("  client   : {}", client.display());
     }
-    println!();
-    println!("server certificate SPKI pin (for agent tls.pin):");
-    println!("  {}", report.server_pin);
-    println!();
+    outln!();
+    outln!("server certificate SPKI pin (for agent tls.pin):");
+    outln!("  {}", report.server_pin);
+    outln!();
     if args.self_signed {
-        println!(
+        outln!(
             "Self-signed mode: point the agent's tls.ca at {}",
             report.ca_cert.display()
         );
     } else {
-        println!(
+        outln!(
             "Distribute {} to agents and set agent tls.ca to it.",
             report.ca_cert.display()
         );
@@ -306,91 +368,65 @@ fn cmd_gen_certs(args: GenCertsArgs) -> Result<()> {
 }
 
 fn cmd_init(args: InitArgs) -> Result<()> {
-    std::fs::create_dir_all(&args.dir)
-        .map_err(|e| Error::Config(format!("cannot create {}: {e}", args.dir.display())))?;
-    let domain = args.domain.trim().to_string();
-    if domain.is_empty() {
-        return Err(Error::Config("--domain must not be empty".into()));
-    }
-    let certs_dir = args.dir.join("certs");
-    let report = if matches!(args.role, Role::Server | Role::Both) {
-        Some(crate::tls::generate_certs(&GenCertsOptions {
-            dir: certs_dir.clone(),
-            domain: domain.clone(),
-            client_cert: args.mtls,
-            self_signed: false,
-            force: args.force,
-        })?)
-    } else {
-        None
+    let role = match args.role {
+        Role::Server => crate::setup::InitRole::Server,
+        Role::Agent => crate::setup::InitRole::Agent,
+        Role::Both => crate::setup::InitRole::Both,
     };
+    let report = crate::setup::init_project(&crate::setup::InitOptions {
+        dir: args.dir.clone(),
+        domain: args.domain.clone(),
+        role,
+        mtls: args.mtls,
+        force: args.force,
+    })?;
 
-    let api_key = crate::util::random_token("dlk_", 24);
-    let agent_token = crate::util::random_token("agt_", 24);
-
-    if matches!(args.role, Role::Server | Role::Both) {
-        let mut text = ServerConfig::example().to_string();
-        text = text.replace("dlk_replace_me_with_a_random_token", &api_key);
-        text = text.replace("agt_replace_me_with_a_random_token", &agent_token);
-        write_file(&args.dir.join("server.toml"), &text, args.force)?;
-        println!("wrote {}", args.dir.join("server.toml").display());
+    if let Some(path) = &report.server_toml {
+        outln!("wrote {}", path.display());
     }
-    if matches!(args.role, Role::Agent | Role::Both) {
-        let mut text = AgentConfig::example().to_string();
-        text = text.replace("agt_replace_me_with_a_random_token", &agent_token);
-        text = text.replace(
-            "server = \"gateway.example.com:443\"",
-            &format!("server = \"{domain}:443\""),
+    if let Some(path) = &report.agent_toml {
+        outln!("wrote {}", path.display());
+    }
+
+    outln!();
+    outln!("next steps:");
+    if let Some(_path) = &report.server_toml {
+        outln!("  1. copy certs/ and server.toml to the gateway host");
+        outln!("     divertlink server -c server.toml");
+        outln!("  2. API key for new-api / SDK clients: {}", report.api_key);
+    }
+    if let Some(_path) = &report.agent_toml {
+        let domain = args.domain.trim();
+        outln!("  3. copy agent.toml (+ certs/ca.crt) to the home host");
+        outln!("     divertlink agent -c agent.toml");
+        outln!(
+            "  4. test: curl -N https://{domain}/home/v1/models -H 'Authorization: Bearer {}'",
+            report.api_key
         );
-        if matches!(args.role, Role::Both) {
-            text = text.replace("# ca = \"certs/ca.crt\"", "ca = \"certs/ca.crt\"");
-        }
-        if let Some(report) = &report {
-            text = text.replace("# pin = \"\"", &format!("pin = \"{}\"", report.server_pin));
-            if let (Some(cert), Some(key)) = (&report.client_cert, &report.client_key) {
-                text = text.replace(
-                    "# client_cert = \"certs/client.crt\"",
-                    &format!("client_cert = \"{}\"", cert.display()),
-                );
-                text = text.replace(
-                    "# client_key = \"certs/client.key\"",
-                    &format!("client_key = \"{}\"", key.display()),
-                );
-            }
-        }
-        write_file(&args.dir.join("agent.toml"), &text, args.force)?;
-        println!("wrote {}", args.dir.join("agent.toml").display());
     }
-
-    println!();
-    println!("next steps:");
-    if matches!(args.role, Role::Server | Role::Both) {
-        println!("  1. copy certs/ and server.toml to the gateway host");
-        println!("     divertlink server -c server.toml");
-        println!("  2. API key for new-api / SDK clients: {api_key}");
-    }
-    if matches!(args.role, Role::Agent | Role::Both) {
-        println!("  3. copy agent.toml (+ certs/ca.crt) to the home host");
-        println!("     divertlink agent -c agent.toml");
-        println!("  4. test: curl -N https://{domain}/home/v1/models -H 'Authorization: Bearer {api_key}'");
-    }
-    if matches!(args.role, Role::Agent) {
-        println!();
-        println!("   note: --role agent does not generate certificates; copy certs/ca.crt from the gateway");
+    if role == crate::setup::InitRole::Agent {
+        outln!();
+        outln!("   note: --role agent does not generate certificates; copy certs/ca.crt from the gateway");
     }
     if args.mtls {
-        println!();
-        println!("   mutual TLS is generated but not enabled automatically:");
-        println!("   - server.toml: set tls.client_ca = \"certs/ca.crt\" and use a dedicated tunnel_listen");
-        println!("     (tunnel_listen must differ from ingress_listen when mTLS is enabled)");
-        if matches!(args.role, Role::Server | Role::Both) {
-            println!("   - agent.toml already points at certs/client.crt and certs/client.key");
+        outln!();
+        outln!("   mutual TLS is generated but not enabled automatically:");
+        outln!("   - server.toml: set tls.client_ca = \"certs/ca.crt\" and use a dedicated tunnel_listen");
+        outln!("     (tunnel_listen must differ from ingress_listen when mTLS is enabled)");
+        if role.has_server() {
+            outln!("   - agent.toml already points at certs/client.crt and certs/client.key");
         }
+    }
+    if role.has_server() {
+        outln!();
+        outln!("   tip: run `divertlink console` for a graphical dashboard of both ends");
     }
     Ok(())
 }
 
-fn write_file(path: &Path, contents: &str, force: bool) -> Result<()> {
+#[cfg(test)]
+#[allow(dead_code)]
+fn write_file(path: &std::path::Path, contents: &str, force: bool) -> Result<()> {
     if path.exists() && !force {
         return Err(Error::Config(format!(
             "{} already exists; pass --force to overwrite",
@@ -402,24 +438,57 @@ fn write_file(path: &Path, contents: &str, force: bool) -> Result<()> {
 }
 
 fn cmd_check(args: CheckArgs) -> Result<()> {
-    let text = std::fs::read_to_string(&args.config)
-        .map_err(|e| Error::Config(format!("cannot read {}: {e}", args.config.display())))?;
-    if text.contains("[agent]") && !text.contains("[server]") {
-        let config = AgentConfig::from_toml_str(&text)?;
-        println!("agent configuration OK: {}", args.config.display());
-        println!(
-            "  tunnel: {} | gateway: {} | target: {}",
-            config.agent.id, config.agent.server, config.target.url
-        );
+    let config = args.config.clone();
+    let text = std::fs::read_to_string(&config)
+        .map_err(|e| Error::Config(format!("cannot read {}: {e}", config.display())))?;
+
+    let base = config.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let warnings = match crate::config::ServerConfig::from_toml_str(&text) {
+        Ok(mut parsed) => {
+            parsed.resolve_paths(base);
+            outln!("server configuration OK: {}", config.display());
+            outln!(
+                "  tunnels: {} | api keys: {} | static routes: {}",
+                parsed.tunnels.len(),
+                parsed.api_keys.len(),
+                parsed.static_routes.len()
+            );
+            parsed.lint()
+        }
+        Err(server_err) => match crate::config::AgentConfig::from_toml_str(&text) {
+            Ok(mut parsed) => {
+                parsed.resolve_paths(base);
+                outln!("agent configuration OK: {}", config.display());
+                outln!(
+                    "  tunnel: {} | gateway: {} | target: {}",
+                    parsed.agent.id, parsed.agent.server, parsed.target.url
+                );
+                parsed.lint()
+            }
+            Err(agent_err) => {
+                return Err(Error::Config(format!(
+                    "{}: not a valid server config ({server_err}); not a valid agent config ({agent_err})",
+                    config.display()
+                )))
+            }
+        },
+    };
+    if warnings.is_empty() {
+        outln!("  no security warnings");
     } else {
-        let config = ServerConfig::from_toml_str(&text)?;
-        println!("server configuration OK: {}", args.config.display());
-        println!(
-            "  tunnels: {} | api keys: {} | static routes: {}",
-            config.tunnels.len(),
-            config.api_keys.len(),
-            config.static_routes.len()
+        for warning in &warnings {
+            eprintln!("warning: {warning}");
+        }
+        outln!(
+            "  {} warning(s); run with --strict to fail on them",
+            warnings.len()
         );
+    }
+    if args.strict && !warnings.is_empty() {
+        return Err(Error::Config(format!(
+            "{} warning(s) treated as errors because of --strict",
+            warnings.len()
+        )));
     }
     Ok(())
 }

@@ -72,12 +72,35 @@ src/
   httpfwd.rs            # 逐跳头清洗、URL 拼接、mount 剥离、IdleTimeoutBody
   telemetry.rs          # tracing 初始化（text/json）
   util.rs               # backoff+jitter、字节尺寸解析、随机 token 等
-  cli.rs                # clap 子命令 server/agent/init/gen-certs/token/check/version
+  net.rs                # 跨平台非阻塞 TCP connect + keepalive（EINPROGRESS/WSAEWOULDBLOCK）
+  upstream.rs           # 共享池化 HTTP client（http/https、私有 CA）
+  setup.rs              # `init` 项目脚手架（CLI 与控制台共用）
+  signal.rs             # Ctrl-C / SIGTERM 统一优雅退出
+  cli.rs                # clap 子命令 server/agent/console/init/gen-certs/token/check/version
+  console/              # 内置图形控制台（单二进制 Web UI / PWA）
+    mod.rs              # ConsoleOptions/Handle、监听、PWA/浏览器打开、生命周期
+    api.rs              # REST API、SSE 日志流、Host/CSRF/Token 防护
+    profile.rs          # profile 存储（JSON, 0600）、配置摘要/角色探测、导入导出
+    supervisor.rs       # 子进程启停（SIGTERM→SIGKILL）、日志环形缓冲与广播
+    probe.rs            # TLS 连接探测（延迟/TLS 版本/证书/SPKI pin）
+    assets.rs           # 编译期嵌入的前端资源
   server/
-    mod.rs              # ServerHandle、监听器启动、优雅退出
-    acceptor.rs         # TLS accept + ALPN 分流 + 隧道会话（yamux server）
+    mod.rs              # ServerHandle、监听器启动、优雅退出、配置体检
+    session.rs          # TLS accept + ALPN 分流 + 隧道会话（yamux server）
     ingress.rs          # 公网 HTTP 入口（axum -> 隧道/静态上游），认证/限流/审计
-    upstream.rs         # static_routes 反向代理 + 共享 upstream HTTP client
+    admin.rs            # /healthz /readyz /metrics /status
+  agent/
+    mod.rs              # AgentHandle、supervisor 重连循环
+    session.rs          # TLS 连接、yamux client、hello、控制流心跳、数据流 accept
+    proxy.rs            # 数据流内 HTTP/1.1 server -> 本地 target 连接池
+assets/
+  server.example.toml   # `init` 使用的模板（编译期嵌入）
+  agent.example.toml
+  console/              # index.html / app.js / style.css / manifest / sw.js / icon.svg
+tests/
+  e2e.rs                # 端到端：TLS/心跳/流式/并发/断线重连/大 body/取消/静态路由/mTLS/pin
+  cli.rs                # 真实二进制：init/gen-certs/token/check/lint
+  console.rs            # 真实控制台进程：REST/UI/PWA/CSRF/前后端联调/进程托管
   agent/
     mod.rs              # AgentHandle、supervisor 重连循环
     session.rs          # TLS 连接、yamux client、hello、控制流心跳、数据流 accept
@@ -213,7 +236,8 @@ divertlink agent    [-c agent.toml]  [--check] [--once]
 divertlink init     [--role server|agent|both] [--dir .] [--domain example.com] [--mtls] [--force]
 divertlink gen-certs --dir certs [--domain ...] [--self-signed] [--client] [--force]
 divertlink token    [--prefix dlk_] [--count 1] [--bytes 24]
-divertlink check    -c config.toml
+divertlink check    -c config.toml [--strict]
+divertlink console  [--listen 127.0.0.1:17653] [--open] [--token TOKEN] [--store PATH]
 divertlink version
 ```
 
@@ -275,10 +299,10 @@ agent::build_state(AgentConfig) -> Result<Arc<AgentState>>;
   11. 管理端点 /healthz /metrics。
 - 发布物：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`、release 构建；
   CI 多平台（linux musl x86_64/aarch64、macOS、Windows）；Docker 多阶段静态镜像；systemd 单元。
-- 当前实现状态：99 个测试全部通过（72 单元 + 8 CLI 集成 + 19 端到端），clippy `-D warnings` 干净，
+- 当前实现状态：127 个测试全部通过（93 单元 + 10 CLI 集成 + 3 控制台集成 + 21 端到端），clippy `-D warnings` 干净，
   rustdoc `-D warnings` 干净；端到端覆盖还包括 mTLS、SPKI pin 匹配/不匹配、错误 token 拒绝、
   请求体超限、SSE 增量性断言、HTTP/2 入口、静态路由鉴权开关、纯明文部署。
-- 冒烟脚本 `scripts/smoke.sh`（14 项断言）与 `make check`（fmt/clippy/test/doc/部署资产自检）均已验证通过。
+- 冒烟脚本 `scripts/smoke.sh`（15 项断言，含内置控制台 UI/API 自检）与 `make check`（fmt/clippy/test/doc/部署资产自检）均已验证通过。
 
 ## 8.1 安全边界（实现细节）
 
@@ -291,6 +315,23 @@ agent::build_state(AgentConfig) -> Result<Arc<AgentState>>;
   `X-Forwarded-*`/`X-Request-Id` 等网关管辖头，杜绝请求走私与头伪造。
 - 请求体上限在网关入口强制执行（超限 413），SSE 响应体有逐块空闲超时；客户端断开时
   通过 yamux 流关闭向上游传播取消。
+
+## 8.2 图形控制台
+
+`divertlink console` 在同一二进制内提供本地 Web 管理面（无 Node/Electron/Tauri 依赖）：
+
+- 监听默认 `127.0.0.1:17653`；非回环必须 `--token`；校验 Host、写操作要求
+  `x-divertlink-console: 1`、永不返回 CORS 头（防 DNS rebinding / CSRF）。
+- profile 存储 `~/.config/divertlink/console/profiles.json`（macOS Application Support、
+  Windows `%APPDATA%`，可用 `DIVERTLINK_HOME` 覆盖；权限 0600）。
+- 子进程托管：`current_exe()` + `server|agent -c <config>`，SIGTERM 后 8s 升级 SIGKILL；
+  stdout/stderr 行流 → 环形缓冲（2000 行）+ broadcast → SSE 推送。
+- REST：`/api/state|profiles|profiles/:id/{start,stop,restart,status,config,logs}`、
+  `/api/init`（脚手架）、`/api/token`、`/api/probe`（TLS 探测）、`/api/export|import`、
+  `/api/shutdown`；静态资源经 `include_str!` 嵌入。
+- 前端为无构建单页应用 + PWA（manifest + service worker，API 不缓存），可安装为桌面应用。
+- UI 参考：cc-switch / cc-switch-web / pi-switch / frpc-desktop / frpmgr（见
+  `docs/console.md`，未复用其代码）。
 
 ## 9. 非目标（MVP 不做）
 

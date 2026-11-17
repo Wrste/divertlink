@@ -251,6 +251,9 @@ pub struct ServerSettings {
     pub admin_listen: Option<SocketAddr>,
     /// Trust `X-Forwarded-For` for the client IP (enable only behind a trusted proxy).
     pub trust_proxy: bool,
+    /// How long in-flight requests and SSE streams may drain on shutdown.
+    #[serde(default = "d_10s", with = "humantime_serde")]
+    pub shutdown_grace: Duration,
 }
 
 fn d_tunnel_listen() -> Option<SocketAddr> {
@@ -278,6 +281,7 @@ impl Default for ServerSettings {
             http_listen: Some(SocketAddr::from(([127, 0, 0, 1], 8080))),
             admin_listen: Some(SocketAddr::from(([127, 0, 0, 1], 9090))),
             trust_proxy: false,
+            shutdown_grace: d_10s(),
         }
     }
 }
@@ -332,6 +336,19 @@ pub struct LimitsSettings {
     /// Maximum concurrent accepted tunnel connections.
     #[serde(default = "d_1024")]
     pub max_connections: usize,
+    /// HTTP methods accepted by the ingress (others get 405).
+    #[serde(default = "d_methods")]
+    pub allowed_methods: Vec<String>,
+    /// Optional gateway-wide rate limit (e.g. `"3000/min"`) applied before auth.
+    #[serde(default)]
+    pub global_rate_limit: Option<String>,
+}
+
+fn d_methods() -> Vec<String> {
+    ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 impl Default for LimitsSettings {
@@ -343,6 +360,8 @@ impl Default for LimitsSettings {
             header_read_timeout: d_10s(),
             max_streams_per_tunnel: d_256(),
             max_connections: d_1024(),
+            allowed_methods: d_methods(),
+            global_rate_limit: None,
         }
     }
 }
@@ -1302,6 +1321,258 @@ pub fn host_without_port(host_header: &str) -> String {
     }
 }
 
+/// A non-fatal configuration warning surfaced by `divertlink check` and at startup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigWarning {
+    /// Config field the warning refers to.
+    pub field: String,
+    /// Human readable explanation and suggested fix.
+    pub message: String,
+}
+
+macro_rules! lint_push {
+    ($warnings:expr, $field:expr, $message:expr $(,)?) => {
+        $warnings.push(ConfigWarning {
+            field: $field.to_string(),
+            message: $message.to_string(),
+        })
+    };
+}
+
+impl std::fmt::Display for ConfigWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.field, self.message)
+    }
+}
+
+fn is_loopback_or_private(host: &str) -> bool {
+    let host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Ok(std::net::IpAddr::V6(ip)) => {
+            ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local()
+        }
+        Err(_) => false,
+    }
+}
+
+fn looks_like_placeholder(secret: &str) -> bool {
+    let lower = secret.to_ascii_lowercase();
+    lower.contains("replace_me")
+        || lower.contains("change_me")
+        || lower.contains("changeme")
+        || lower == "test"
+        || lower == "secret"
+        || lower == "password"
+        || lower.is_empty()
+}
+
+impl ServerConfig {
+    /// Non-fatal security/robustness warnings for `divertlink check`.
+    pub fn lint(&self) -> Vec<ConfigWarning> {
+        let mut warnings = Vec::new();
+        if self.api_keys.is_empty() {
+            lint_push!(
+                warnings,
+                "api_keys",
+                "no API keys configured: the public ingress is unauthenticated"
+            );
+        }
+        for key in &self.api_keys {
+            if key.key.len() < 16 {
+                lint_push!(
+                    warnings,
+                    "api_keys[].key",
+                    format!("API key `{}` is shorter than 16 characters", key.name),
+                );
+            }
+            if looks_like_placeholder(&key.key) {
+                lint_push!(
+                    warnings,
+                    "api_keys[].key",
+                    format!("API key `{}` looks like a placeholder; rotate it", key.name),
+                );
+            }
+            if key.rate_limit.is_none() && key.max_concurrent == 0 {
+                lint_push!(warnings,
+                    "api_keys[]",
+                    format!(
+                        "key `{}` has neither rate_limit nor max_concurrent; a single client can exhaust the tunnel",
+                        key.name
+                    ),
+                );
+            }
+        }
+        for tunnel in &self.tunnels {
+            if tunnel.token.len() < 16 || looks_like_placeholder(&tunnel.token) {
+                lint_push!(
+                    warnings,
+                    "tunnels[].token",
+                    format!("tunnel `{}` token is weak or a placeholder", tunnel.id),
+                );
+            }
+            if tunnel.settings_no_public_health() {
+                lint_push!(
+                    warnings,
+                    "tunnels[].public_paths",
+                    format!(
+                        "tunnel `{}` has no public_paths; health checks will need an API key",
+                        tunnel.id
+                    ),
+                );
+            }
+            if tunnel.upstream_auth_header != UpstreamAuth::Passthrough
+                && tunnel.upstream_key().is_none()
+            {
+                lint_push!(warnings,
+                    "tunnels[].upstream_api_key",
+                    format!(
+                        "tunnel `{}` uses upstream_auth_header = {:?} but upstream_api_key is empty",
+                        tunnel.id, tunnel.upstream_auth_header
+                    ),
+                );
+            }
+        }
+        for route in &self.static_routes {
+            if !route.require_auth {
+                if let Ok(uri) = route.upstream.parse::<http::Uri>() {
+                    let host = uri.host().unwrap_or_default();
+                    if !is_loopback_or_private(host) {
+                        lint_push!(warnings,
+                            "static_routes[].require_auth",
+                            format!(
+                                "static route `{}` disables gateway auth and forwards to non-private host `{host}`; it becomes an open proxy",
+                                route.mount
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        if self.tls.min_version == TlsVersion::V1_2 {
+            lint_push!(
+                warnings,
+                "tls.min_version",
+                "TLS 1.2 is allowed; prefer \"1.3\" for agents and modern clients"
+            );
+        }
+        if let Some(admin) = self.server.admin_listen {
+            if !admin.ip().is_loopback() {
+                lint_push!(warnings,
+                    "server.admin_listen",
+                    format!("admin endpoints are exposed on {admin}; keep them on loopback or a private network"),
+                );
+            }
+        }
+        if self.server.trust_proxy {
+            lint_push!(warnings,
+                "server.trust_proxy",
+                "X-Forwarded-For is trusted: only enable behind a trusted reverse proxy (otherwise allow_ips can be spoofed)",
+            );
+        }
+        if self.limits.max_request_bytes.bytes() > 1024 * 1024 * 1024 {
+            lint_push!(
+                warnings,
+                "limits.max_request_bytes",
+                "request body limit above 1 GiB is not recommended"
+            );
+        }
+        match crate::tls::check_cert_expiry(&self.tls.cert) {
+            Ok((summary, Some(message))) => lint_push!(
+                warnings,
+                "tls.cert",
+                format!("{message} ({} days left)", summary.days_left)
+            ),
+            Ok(_) => {}
+            Err(err) => lint_push!(
+                warnings,
+                "tls.cert",
+                format!("cannot inspect the certificate: {err}")
+            ),
+        }
+        warnings
+    }
+}
+
+impl TunnelSettings {
+    fn settings_no_public_health(&self) -> bool {
+        !self.public_paths.iter().any(|p| p.starts_with("/health"))
+    }
+}
+
+impl AgentConfig {
+    /// Non-fatal security/robustness warnings for `divertlink check`.
+    pub fn lint(&self) -> Vec<ConfigWarning> {
+        let mut warnings = Vec::new();
+        if self.tls.insecure {
+            lint_push!(
+                warnings,
+                "tls.insecure",
+                "certificate verification is DISABLED; never use this in production"
+            );
+        }
+        if self.tls.ca.is_none() && !self.tls.insecure {
+            lint_push!(warnings,
+                "tls.ca",
+                "no custom CA configured: the gateway must use a publicly trusted certificate (Let's Encrypt etc.)",
+            );
+        }
+        if self.agent.token.len() < 16 || looks_like_placeholder(&self.agent.token) {
+            lint_push!(
+                warnings,
+                "agent.token",
+                "agent token is weak or a placeholder; rotate it"
+            );
+        }
+        if self.agent.heartbeat_mode == HeartbeatMode::None {
+            lint_push!(
+                warnings,
+                "agent.heartbeat_mode",
+                "heartbeats are disabled; dead tunnels may take minutes to detect"
+            );
+        }
+        if let Ok(uri) = self.target.url.parse::<http::Uri>() {
+            if uri.scheme_str() == Some("http") {
+                if let Some(host) = uri.host() {
+                    if !is_loopback_or_private(host) {
+                        lint_push!(warnings,
+                            "target.url",
+                            format!("local target `{host}` uses plaintext HTTP over a non-loopback address"),
+                        );
+                    }
+                }
+            }
+            if uri.scheme_str() == Some("https") && self.target.tls_ca.is_none() {
+                lint_push!(
+                    warnings,
+                    "target.tls_ca",
+                    "HTTPS target without a custom CA: the certificate must chain to public roots"
+                );
+            }
+        }
+        if self.agent.max_inflight > 1024 {
+            lint_push!(
+                warnings,
+                "agent.max_inflight",
+                "very high in-flight limit; each stream consumes memory and a backend slot"
+            );
+        }
+        if let Some(pin) = &self.tls.pin {
+            if crate::tls::verify_peer_pin(None, pin).is_err() {
+                lint_push!(
+                    warnings,
+                    "tls.pin",
+                    "pin is not a valid 32-byte SHA-256 SPKI digest (base64/hex)"
+                );
+            }
+        }
+        warnings
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1457,6 +1728,94 @@ mod tests {
         let with_key = format!("{text}\n[[api_keys]]\nname = \"k\"\nkey = \"dlk_test\"\n");
         let cfg = ServerConfig::from_toml_str(&with_key).unwrap();
         assert!(cfg.static_routes[0].require_auth);
+    }
+
+    #[test]
+    fn lint_flags_insecure_defaults() {
+        let text = r#"
+            [server]
+            tunnel_listen = "off"
+            ingress_listen = "off"
+            admin_listen = "0.0.0.0:9090"
+            [tls]
+            cert = ""
+            key = ""
+            min_version = "1.2"
+            [[api_keys]]
+            name = "weak"
+            key = "short"
+            [[tunnels]]
+            id = "home"
+            token = "weak-token"
+            mount = "/home"
+        "#;
+        let cfg = ServerConfig::from_toml_str(text).unwrap();
+        let warnings = cfg.lint();
+        let joined = warnings
+            .iter()
+            .map(|w| w.message.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("TLS 1.2"), "{joined}");
+        assert!(joined.contains("shorter than 16"), "{joined}");
+        assert!(joined.contains("weak or a placeholder"), "{joined}");
+        assert!(joined.contains("admin endpoints are exposed"), "{joined}");
+        assert!(joined.contains("neither rate_limit"), "{joined}");
+    }
+
+    #[test]
+    fn lint_flags_open_static_route_and_private_is_ok() {
+        let text = r#"
+            [tls]
+            cert = ""
+            key = ""
+            [server]
+            tunnel_listen = "off"
+            ingress_listen = "off"
+            [[api_keys]]
+            name = "k"
+            key = "dlk_0123456789abcdef0123456789"
+            [[static_routes]]
+            mount = "/open"
+            upstream = "http://203.0.113.5:3000"
+            require_auth = false
+            [[static_routes]]
+            mount = "/local"
+            upstream = "http://127.0.0.1:3000"
+            require_auth = false
+        "#;
+        let cfg = ServerConfig::from_toml_str(text).unwrap();
+        let warnings = cfg.lint();
+        let open: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.message.contains("open proxy"))
+            .collect();
+        assert_eq!(
+            open.len(),
+            1,
+            "only the public upstream should warn: {warnings:?}"
+        );
+        assert!(open[0].message.contains("203.0.113.5"), "{:?}", open[0]);
+    }
+
+    #[test]
+    fn agent_lint_flags_insecure_and_weak_secrets() {
+        let mut cfg = AgentConfig::default();
+        cfg.agent.id = "home".into();
+        cfg.agent.server = "gw.example.com:443".into();
+        cfg.agent.token = "short".into();
+        cfg.agent.heartbeat_mode = HeartbeatMode::None;
+        cfg.tls.insecure = true;
+        cfg.target.url = "http://192.168.1.10:8000".into();
+        let warnings = cfg.lint();
+        let joined = warnings
+            .iter()
+            .map(|w| w.message.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("DISABLED"), "{joined}");
+        assert!(joined.contains("weak or a placeholder"), "{joined}");
+        assert!(joined.contains("heartbeats are disabled"), "{joined}");
     }
 
     #[test]

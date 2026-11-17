@@ -37,8 +37,10 @@ pub struct ServerState {
     pub keys: Arc<KeyStore>,
     /// Process metrics.
     pub metrics: Arc<Metrics>,
-    /// Prebuilt ingress router (auth + routing + forwarding).
-    pub ingress_router: Router,
+    /// Gateway-wide rate limiter (optional, applied before auth).
+    pub global_limiter: Option<crate::ratelimit::RateLimiter>,
+    /// Allowed HTTP methods (anything else is rejected with 405).
+    pub allowed_methods: Vec<axum::http::Method>,
 }
 
 impl std::fmt::Debug for ServerState {
@@ -46,6 +48,7 @@ impl std::fmt::Debug for ServerState {
         f.debug_struct("ServerState")
             .field("config", &self.config.server.name)
             .field("keys", &self.keys.len())
+            .field("global_rate_limit", &self.global_limiter.is_some())
             .finish()
     }
 }
@@ -87,11 +90,13 @@ impl ServerHandle {
         self.shutdown.cancel();
     }
 
-    /// Cancel and wait for listener tasks to finish.
+    /// Cancel and wait for listener tasks to finish, draining in-flight requests
+    /// for at most `server.shutdown_grace`.
     pub async fn shutdown(mut self) {
         self.shutdown.cancel();
+        let grace = self.state.config.server.shutdown_grace;
         for task in self.tasks.drain(..) {
-            let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
+            let _ = tokio::time::timeout(grace, task).await;
         }
     }
 }
@@ -121,6 +126,30 @@ pub async fn run(
     }
     if config.tls.client_ca.is_some() {
         info!("mutual TLS enabled for agent connections");
+    }
+    // Surface configuration warnings (open proxies, weak tokens, TLS 1.2, ...).
+    for warning in config.lint() {
+        warn!("config warning: {warning}");
+    }
+    // Fail fast on an expired certificate instead of failing every handshake.
+    if config.server.tunnel_listen.is_some() || config.server.ingress_listen.is_some() {
+        match crate::tls::check_cert_expiry(&config.tls.cert) {
+            Ok((summary, Some(message))) => warn!(
+                days_left = summary.days_left,
+                not_after = summary.not_after_unix,
+                "{message}"
+            ),
+            Ok((summary, None)) => info!(
+                days_left = summary.days_left,
+                sans = ?summary.sans,
+                "TLS certificate loaded"
+            ),
+            Err(err) => {
+                return Err(Error::Tls(format!(
+                    "gateway TLS certificate is unusable: {err}"
+                )))
+            }
+        }
     }
     crate::tls::install_default_provider();
     let shutdown = shutdown.unwrap_or_default();
@@ -155,22 +184,27 @@ pub async fn run(
     let keys = Arc::new(KeyStore::from_config(&config.api_keys)?);
     let config = Arc::new(config);
 
-    let ingress_router = ingress::router(Arc::new(ServerState {
-        config: config.clone(),
-        registry: registry.clone(),
-        keys: keys.clone(),
-        metrics: metrics.clone(),
-        ingress_router: Router::new(),
-    }));
-    // Rebuild with the real router: ServerState must contain the router used by
-    // both the TLS and plaintext listeners.
+    let global_limiter = match &config.limits.global_rate_limit {
+        Some(spec) => Some(crate::ratelimit::RateLimiter::new(spec.parse()?)),
+        None => None,
+    };
+    let allowed_methods: Vec<axum::http::Method> = config
+        .limits
+        .allowed_methods
+        .iter()
+        .filter_map(|m| m.parse().ok())
+        .collect();
     let state = Arc::new(ServerState {
         config: config.clone(),
         registry,
         keys,
         metrics: metrics.clone(),
-        ingress_router,
+        global_limiter,
+        allowed_methods,
     });
+    // The router is built from the final state so every handler sees the same
+    // registry, keys, limiter and method allow list.
+    let ingress_router = ingress::router(state.clone());
 
     let tunnel_acceptor = tunnel_tls.clone();
     let ingress_acceptor = ingress_tls.clone();
@@ -201,6 +235,7 @@ pub async fn run(
                 .ok_or_else(|| Error::Config("shared listener requires TLS material".into()))?,
             TlsRole::Combined,
             state.clone(),
+            ingress_router.clone(),
             shutdown.clone(),
             config.limits.max_connections,
         ));
@@ -216,6 +251,7 @@ pub async fn run(
                     .ok_or_else(|| Error::Config("tunnel listener requires TLS material".into()))?,
                 TlsRole::TunnelOnly,
                 state.clone(),
+                ingress_router.clone(),
                 shutdown.clone(),
                 config.limits.max_connections,
             ));
@@ -231,6 +267,7 @@ pub async fn run(
                 })?,
                 TlsRole::IngressOnly,
                 state.clone(),
+                ingress_router.clone(),
                 shutdown.clone(),
                 config.limits.max_connections,
             ));
@@ -244,6 +281,7 @@ pub async fn run(
         tasks.push(spawn_http_accept(
             listener,
             state.clone(),
+            ingress_router.clone(),
             shutdown.clone(),
             config.limits.max_connections,
         ));
@@ -291,6 +329,7 @@ fn spawn_tls_accept(
     acceptor: Arc<TlsAcceptor>,
     role: TlsRole,
     state: Arc<ServerState>,
+    router: Router,
     shutdown: CancellationToken,
     max_connections: usize,
 ) -> tokio::task::JoinHandle<()> {
@@ -316,6 +355,7 @@ fn spawn_tls_accept(
             };
             let acceptor = acceptor.clone();
             let state = state.clone();
+            let router = router.clone();
             let shutdown = shutdown.clone();
             tokio::spawn(async move {
                 let _permit = permit;
@@ -354,7 +394,7 @@ fn spawn_tls_accept(
                             warn!(%peer, alpn = ?alpn, "non-tunnel client on tunnel port; rejecting");
                             return;
                         }
-                        serve_ingress(tls, peer, state, shutdown).await;
+                        serve_ingress(tls, peer, state, router, shutdown).await;
                     }
                 }
             });
@@ -366,6 +406,7 @@ fn spawn_tls_accept(
 fn spawn_http_accept(
     listener: TcpListener,
     state: Arc<ServerState>,
+    router: Router,
     shutdown: CancellationToken,
     max_connections: usize,
 ) -> tokio::task::JoinHandle<()> {
@@ -389,10 +430,11 @@ fn spawn_http_accept(
                 continue;
             };
             let state = state.clone();
+            let router = router.clone();
             let shutdown = shutdown.clone();
             tokio::spawn(async move {
                 let _permit = permit;
-                serve_ingress(tcp, peer, state, shutdown).await;
+                serve_ingress(tcp, peer, state, router, shutdown).await;
             });
         }
         debug!("plaintext listener stopped");
@@ -439,11 +481,11 @@ async fn serve_ingress<I>(
     io: I,
     peer: SocketAddr,
     state: Arc<ServerState>,
+    router: Router,
     shutdown: CancellationToken,
 ) where
     I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    let router = state.ingress_router.clone();
     let service = PeerInjector::new(router, peer);
     let hyper_service = TowerToHyperService::new(service);
     let mut builder = AutoBuilder::new(TokioExecutor::new());
@@ -461,7 +503,10 @@ async fn serve_ingress<I>(
         }
         _ = shutdown.cancelled() => {
             conn.as_mut().graceful_shutdown();
-            let _ = tokio::time::timeout(Duration::from_secs(2), conn).await;
+            let grace = state.config.server.shutdown_grace;
+            if tokio::time::timeout(grace, conn).await.is_err() {
+                debug!(%peer, "ingress connection did not drain within the shutdown grace period");
+            }
         }
     }
 }
@@ -533,9 +578,7 @@ pub async fn run_until_signal(config: ServerConfig) -> Result<()> {
     let handle = run(config, None).await?;
     let addrs = handle.addrs();
     info!(?addrs, "divertlink gateway started");
-    tokio::signal::ctrl_c()
-        .await
-        .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
+    crate::signal::shutdown_signal().await;
     info!("shutdown signal received");
     handle.shutdown().await;
     Ok(())

@@ -154,6 +154,28 @@ pub fn sanitize_response_headers(headers: &HeaderMap) -> HeaderMap {
     out
 }
 
+/// Add headers that keep servers and reverse proxies from buffering SSE.
+///
+/// `X-Accel-Buffering: no` is honoured by nginx/Ingress controllers; `no-transform`
+/// tells intermediary caches not to recompress the stream.
+pub fn apply_stream_headers(headers: &mut HeaderMap) {
+    let is_sse = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_ascii_lowercase().starts_with("text/event-stream"))
+        .unwrap_or(false);
+    if is_sse {
+        headers.insert(
+            header::HeaderName::from_static("x-accel-buffering"),
+            HeaderValue::from_static("no"),
+        );
+        headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, no-transform"),
+        );
+    }
+}
+
 /// Strip a mount prefix from a request path.
 ///
 /// * `/home` + `/home` -> `Some("/")`

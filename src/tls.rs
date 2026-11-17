@@ -220,6 +220,102 @@ pub fn spki_pin(cert_der: &[u8]) -> Result<String> {
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest))
 }
 
+/// A certificate summary used by startup checks, `check` linting and the console
+/// connectivity probe.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CertSummary {
+    /// Subject distinguished name (human readable).
+    pub subject: String,
+    /// Issuer distinguished name (human readable).
+    pub issuer: String,
+    /// Subject Alternative Names.
+    pub sans: Vec<String>,
+    /// Not-before as UNIX seconds.
+    pub not_before_unix: i64,
+    /// Not-after as UNIX seconds.
+    pub not_after_unix: i64,
+    /// Days until expiry (negative when already expired).
+    pub days_left: i64,
+    /// SPKI SHA-256 pin (base64url, no padding).
+    pub spki_pin: String,
+    /// Whether the certificate is a CA certificate.
+    pub is_ca: bool,
+}
+
+/// Inspect a DER certificate. Returns a summary without performing chain
+/// validation (callers that need validation use the TLS handshake itself).
+pub fn cert_summary(der: &[u8]) -> Result<CertSummary> {
+    let (_, cert) = x509_parser::parse_x509_certificate(der)
+        .map_err(|e| Error::Tls(format!("cannot parse certificate: {e}")))?;
+    let mut sans = Vec::new();
+    if let Ok(Some(ext)) = cert.subject_alternative_name() {
+        for name in &ext.value.general_names {
+            let rendered = match name {
+                x509_parser::extensions::GeneralName::DNSName(name) => format!("DNS:{name}"),
+                x509_parser::extensions::GeneralName::IPAddress(raw) => {
+                    let ip = match raw.len() {
+                        4 => Some(std::net::IpAddr::from([raw[0], raw[1], raw[2], raw[3]])),
+                        16 => {
+                            let mut octets = [0u8; 16];
+                            octets.copy_from_slice(raw);
+                            Some(std::net::IpAddr::from(octets))
+                        }
+                        _ => None,
+                    };
+                    match ip {
+                        Some(ip) => format!("IP:{ip}"),
+                        None => "IP:<invalid>".to_string(),
+                    }
+                }
+                other => format!("{other:?}"),
+            };
+            sans.push(rendered);
+        }
+    }
+    let not_before = cert.validity().not_before.timestamp();
+    let not_after = cert.validity().not_after.timestamp();
+    let now = crate::util::unix_now() as i64;
+    Ok(CertSummary {
+        subject: cert.subject().to_string(),
+        issuer: cert.issuer().to_string(),
+        sans,
+        not_before_unix: not_before,
+        not_after_unix: not_after,
+        days_left: (not_after - now) / 86_400,
+        spki_pin: spki_pin(der)?,
+        is_ca: cert.is_ca(),
+    })
+}
+
+/// Warn (or fail) when a certificate is close to expiry.
+///
+/// Returns the summary so callers can log it. `warn_days` controls the warning
+/// threshold; already-expired certificates are reported as an error.
+pub fn check_cert_expiry(path: &Path) -> Result<(CertSummary, Option<String>)> {
+    let chain = load_cert_chain(path)?;
+    let leaf = chain
+        .first()
+        .ok_or_else(|| Error::Tls(format!("no certificate in {}", path.display())))?;
+    let summary = cert_summary(leaf.as_ref())?;
+    if summary.days_left < 0 {
+        return Err(Error::Tls(format!(
+            "certificate {} expired {} day(s) ago",
+            path.display(),
+            -summary.days_left
+        )));
+    }
+    let warning = if summary.days_left < 30 {
+        Some(format!(
+            "certificate {} expires in {} day(s); renew it now",
+            path.display(),
+            summary.days_left
+        ))
+    } else {
+        None
+    };
+    Ok((summary, warning))
+}
+
 /// Verify a peer's certificate chain against an expected SPKI pin.
 ///
 /// Accepts base64 (standard or URL-safe, with or without padding) or hex pins,
@@ -516,6 +612,11 @@ pub fn generate_certs(opts: &GenCertsOptions) -> Result<CertReport> {
     server_params
         .distinguished_name
         .push(DnType::CommonName, "divertlink-server");
+    // Explicit validity: 13 months for the leaf, so operators get a renewal
+    // reminder window instead of rcgen's multi-decade default.
+    let now = time::OffsetDateTime::now_utc();
+    server_params.not_before = now - time::Duration::days(1);
+    server_params.not_after = now + time::Duration::days(397);
     server_params.key_usages = vec![
         KeyUsagePurpose::DigitalSignature,
         KeyUsagePurpose::KeyEncipherment,
@@ -540,6 +641,8 @@ pub fn generate_certs(opts: &GenCertsOptions) -> Result<CertReport> {
             format!("DivertLink CA ({})", opts.domain),
         );
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.not_before = now - time::Duration::days(1);
+        ca_params.not_after = now + time::Duration::days(3650);
         ca_params.key_usages = vec![
             KeyUsagePurpose::KeyCertSign,
             KeyUsagePurpose::CrlSign,
@@ -587,6 +690,8 @@ pub fn generate_certs(opts: &GenCertsOptions) -> Result<CertReport> {
             .distinguished_name
             .push(DnType::CommonName, "divertlink-agent");
         client_params.is_ca = IsCa::NoCa;
+        client_params.not_before = now - time::Duration::days(1);
+        client_params.not_after = now + time::Duration::days(397);
         client_params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
         client_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
         let client_cert = client_params
@@ -724,6 +829,29 @@ mod tests {
         let mut forced = o.clone();
         forced.force = true;
         generate_certs(&forced).unwrap();
+    }
+
+    #[test]
+    fn cert_summary_reports_validity() {
+        let tmp = TempDir::new().unwrap();
+        let report = generate_certs(&opts(tmp.path())).unwrap();
+        let chain = load_cert_chain(&report.server_cert).unwrap();
+        let summary = cert_summary(chain[0].as_ref()).unwrap();
+        assert!(summary.days_left > 0);
+        assert!(
+            (300..=500).contains(&summary.days_left),
+            "leaf validity should be ~13 months, got {} days",
+            summary.days_left
+        );
+        assert!(!summary.is_ca);
+        assert!(summary
+            .sans
+            .iter()
+            .any(|s| s == "DNS:localhost" || s == "IP:127.0.0.1"));
+        assert_eq!(summary.spki_pin, report.server_pin);
+        let (again, warning) = check_cert_expiry(&report.server_cert).unwrap();
+        assert_eq!(again.not_after_unix, summary.not_after_unix);
+        assert!(warning.is_none());
     }
 
     #[test]

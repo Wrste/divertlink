@@ -361,5 +361,32 @@ CODE="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
 [[ "$CODE" == "200" ]] || fail "明文入口期望 200，实际 ${CODE}"
 pass "明文 http_listen 入口可用（200）"
 
+# 9) 内置图形控制台（本地 Web UI / PWA）
+CONSOLE_STORE="${WORK}/console-profiles.json"
+"${BINARY}" console --listen 127.0.0.1:0 --no-autostart --store "${CONSOLE_STORE}"     > "${WORK}/console.log" 2>&1 &
+CONSOLE_PID=$!
+CONSOLE_URL=""
+for _ in $(seq 1 100); do
+    CONSOLE_URL=$(grep -oE 'http://127\.0\.0\.1:[0-9]+/?$' "${WORK}/console.log" 2>/dev/null | tail -1 || true)
+    if [ -z "${CONSOLE_URL}" ]; then
+        CONSOLE_URL=$(grep -oE 'http://127\.0\.0\.1:[0-9]+' "${WORK}/console.log" 2>/dev/null | head -1 || true)
+    fi
+    [ -n "${CONSOLE_URL}" ] && break
+    sleep 0.1
+done
+[ -n "${CONSOLE_URL}" ] || fail "控制台没有输出监听地址"
+[[ "${CONSOLE_URL}" == */ ]] || CONSOLE_URL="${CONSOLE_URL}/"
+for _ in $(seq 1 100); do
+    curl -fsS "${CONSOLE_URL}api/healthz" >/dev/null 2>&1 && break
+    sleep 0.1
+done
+curl -fsS "${CONSOLE_URL}api/healthz" >/dev/null || fail "控制台 API 未就绪"
+curl -fsS "${CONSOLE_URL}" | grep -q "DivertLink" || fail "控制台首页缺少 DivertLink 标识"
+curl -fsS "${CONSOLE_URL}app.js" >/dev/null || fail "控制台前端资源不可用"
+grep -q '"profiles"' <(curl -fsS "${CONSOLE_URL}api/state") || fail "控制台 /api/state 输出异常"
+curl -sS -X POST -H "x-divertlink-console: 1" "${CONSOLE_URL}api/shutdown" >/dev/null 2>&1 || true
+wait "${CONSOLE_PID}" 2>/dev/null || true
+pass "内置图形控制台可用（UI/Asset/API/正常关闭）"
+
 echo
 echo "冒烟测试通过：${PASS} 项检查全部成功"

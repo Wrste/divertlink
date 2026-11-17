@@ -65,6 +65,40 @@ pub async fn ingress_handler(
         );
     }
 
+    // Method allow list: rejects TRACE/CONNECT and other unusual verbs early.
+    if !state.allowed_methods.is_empty() && !state.allowed_methods.contains(&method) {
+        let mut response = error_response(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method_not_allowed",
+            &format!("{method} is not allowed by limits.allowed_methods"),
+        );
+        if let Ok(value) = HeaderValue::from_str(
+            &state
+                .allowed_methods
+                .iter()
+                .map(|m| m.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ) {
+            response.headers_mut().insert(header::ALLOW, value);
+        }
+        return response;
+    }
+
+    // Gateway-wide rate limit (protects the whole ingress, before auth).
+    if let Some(limiter) = &state.global_limiter {
+        if let Err(retry) = limiter.check() {
+            state.metrics.rate_limited.fetch_add(1, Ordering::Relaxed);
+            let mut response = error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                "gateway-wide rate limit exceeded",
+            );
+            set_retry_after(&mut response, retry);
+            return response;
+        }
+    }
+
     // Reject obviously oversized bodies before touching the tunnel.
     let max_body = state.config.limits.max_request_bytes.bytes();
     if let Some(value) = request.headers().get(header::CONTENT_LENGTH) {
@@ -500,7 +534,8 @@ fn build_response_guarded(
     request_id: Option<String>,
     guards: BodyGuards,
 ) -> HttpResponse<Body> {
-    let headers = sanitize_response_headers(&headers);
+    let mut headers = sanitize_response_headers(&headers);
+    crate::httpfwd::apply_stream_headers(&mut headers);
     let mut response = HttpResponse::new(stream_body(incoming, idle_timeout, stats, guards));
     *response.status_mut() = status;
     *response.headers_mut() = headers;

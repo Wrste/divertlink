@@ -177,6 +177,20 @@ agent 可配置 `[tls].pin`（SPKI SHA-256，base64 或 hex），`gen-certs` 会
 > 体上限与超时约束。因此 `require_auth = false` 的静态路由只应指向 `127.0.0.1` /
 > 内网上游，并确保上游（如 new-api）自己校验客户端令牌。
 
+## 5.5 图形控制台的安全边界
+
+内置控制台（`divertlink console`，见 [console.md](console.md)）是**本地管理面**，默认
+行为与加固点：
+
+- 默认只监听 `127.0.0.1:17653`；绑定非回环地址必须显式提供 `--token`，否则拒绝启动；
+- 校验 `Host` 头（防 DNS rebinding）；所有写操作要求自定义头 `x-divertlink-console: 1`
+  （浏览器跨域无法在不触发 CORS 预检的情况下发送，而服务端从不返回 CORS 允许头）；
+- 支持 `--token` / `DIVERTLINK_CONSOLE_TOKEN`，比较为常量时间；令牌不写入日志；
+- profile 存储为 JSON、权限 `0600`，含配置路径而不含证书/令牌明文（令牌仍在配置文件中，
+  由文件权限保护）；
+- 控制台只启动 `divertlink server|agent -c <已登记配置>`，不接受任意命令；
+- 远程管理建议 `ssh -L 17653:127.0.0.1:17653`，不要把控制台端口直接暴露公网。
+
 ## 6. 审计与可观测
 
 - 网关默认（`[log].level = "info"`）记录生命周期事件：监听地址、agent 连上/断开、会话
@@ -315,6 +329,12 @@ RestartSec=2
   `admin_listen` 写 `"off"`/`false` 即关闭；省略字段则回落默认地址。
 - **固定值**：agent 对 target 响应体的空闲上限固定为 300s，不可配置；
   `[limits].header_read_timeout` 已接入入口/管理/agent 数据流的 HTTP 读头超时。
+- **网关级防护**：`[limits].global_rate_limit` 在认证前限流；
+  `[limits].allowed_methods` 拒绝 TRACE/CONNECT 等非预期方法；
+  SSE 响应自动加 `X-Accel-Buffering: no` / `Cache-Control: no-transform`；
+  优雅退出由 `[server].shutdown_grace` 控制（SIGTERM 与 Ctrl-C 行为一致）。
+- **配置体检**：`divertlink check -c <file>` 输出安全告警，`--strict` 可把告警当错误，
+  适合 CI 门禁。
 - **无内置 ACME/证书热加载**：证书需外部签发/续期并重启进程。
 - **会话热替换**：同一隧道的新会话会替换旧会话；token 泄露的直接影响是隧道被接管，
   因此 token 管理比 API Key 更敏感。
