@@ -23,7 +23,7 @@ protocols = ["openai", "anthropic", "vllm"]
 
 [tls]
 # CA bundle used to verify the gateway certificate.
-# - Let's Encrypt / public CA: leave empty to use the system trust store.
+# - Let's Encrypt / public CA: omit this setting to use bundled public roots.
 # - Self-signed deployment: point at the generated certs/ca.crt.
 # ca = "certs/ca.crt"
 # Optional SPKI pin (base64 or hex SHA-256). Printed by `divertlink gen-certs`.

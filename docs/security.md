@@ -1,5 +1,7 @@
 # 安全指南
 
+**中文** · [English](en/security.md) · [文档目录](README.md)
+
 DivertLink 把一个没有公网 IP 的家庭 LLM 服务暴露到公网，安全边界需要明确：
 **网关服务器是信任锚点，家庭端出站连接是唯一入口**。本文给出威胁模型、可用的防护措施、
 密钥管理与运维加固清单。
@@ -27,7 +29,7 @@ DivertLink 把一个没有公网 IP 的家庭 LLM 服务暴露到公网，安全
 - **网关服务器**：公网唯一入口，持有服务端私钥与 `server.toml`（含所有令牌）。
   必须由你控制、加固、监控。
 - **家庭端**：只发起出站 TLS 连接，不需要公网 IP 或端口映射；token 泄露意味着他人可
-  以该隧道 id 接管连接（会话支持热替换），因此 token 等同密码。
+  以该隧道 id 加入会话池并接收请求，因此 token 等同密码。
 - **客户端**：持有网关 API Key；通过 `upstream_api_key` 替换模式可以做到真实上游 Key
   只存在于网关配置中。
 - **家庭内服务**：应只监听 `127.0.0.1`，不因 DivertLink 的引入而额外暴露到局域网；
@@ -39,7 +41,7 @@ DivertLink 把一个没有公网 IP 的家庭 LLM 服务暴露到公网，安全
 | --- | --- | --- | --- |
 | T1 | 公网扫描、暴力猜解 API Key | 盗用算力/额度 | 高熵 Key、`rate_limit`、`allow_ips`、`max_concurrent`、日志告警 |
 | T2 | API Key 泄露 | 未授权调用、费用损失 | 一调用方一 Key、`allow_tunnels` 最小权限、轮换、吊销后重启生效 |
-| T3 | agent token 泄露 | 攻击者注册同名隧道接管流量（会话热替换） | token 视同密码、定期轮换、mTLS/SPKI pin、监控 `/status` 会话变化 |
+| T3 | agent token 泄露 | 攻击者以同名隧道加入会话池并接收流量 | token 视同密码、定期轮换、mTLS/SPKI pin、监控 `/status` 会话变化 |
 | T4 | 中间人攻击（TLS 降级/伪造证书） | 窃听或篡改 LLM 流量 | TLS 1.3 默认、`min_version="1.3"`、agent `[tls].ca` 校验、可选 SPKI pin、禁止 `insecure` |
 | T5 | 客户端或 new-api 被攻破 | 以合法 Key 发起滥用 | 细粒度 Key、限流、并发上限、按需 `allow_tunnels`，new-api 侧额度控制 |
 | T6 | 请求体/并发洪水导致 DoS | 网关内存、连接、上游算力被打满 | `max_request_bytes`、`max_connections`、`max_streams`、`request_timeout`、`stream_idle_timeout` |
@@ -87,10 +89,11 @@ DivertLink 把一个没有公网 IP 的家庭 LLM 服务暴露到公网，安全
 ### 3.3 SPKI pinning
 
 agent 可配置 `[tls].pin`（SPKI SHA-256，base64 或 hex），`gen-certs` 会直接打印该值。
-作用：把信任锚定到网关证书的公钥，即使某个 CA 被错误签发证书也无法完成中间人攻击。
+作用：在正常证书链、主机名与有效期校验之后，额外匹配证书公钥。pin 不会代替 CA 校验，
+自签证书仍需配置 `ca`；未配置 `ca` 时 agent 使用内置公共根证书。
 
 - 适用于自签/内部 CA 环境，或需要对公网 CA 再加一层绑定的场景。
-- **轮换成本**：pin 是单值字段，证书/密钥更新后 pin 会变化，必须同步更新所有 agent
+- **轮换成本**：pin 是单值字段，换用新密钥后 pin 会变化（同公钥续签不改变 SPKI），必须同步更新所有 agent
   的 `pin` 并重启 agent，建议安排在维护窗口。
 - 生产环境若使用公网 CA 且不希望通过 pin 增加运维复杂度，可只依赖 `[tls].ca` 校验。
 
@@ -336,7 +339,7 @@ RestartSec=2
 - **配置体检**：`divertlink check -c <file>` 输出安全告警，`--strict` 可把告警当错误，
   适合 CI 门禁。
 - **无内置 ACME/证书热加载**：证书需外部签发/续期并重启进程。
-- **会话热替换**：同一隧道的新会话会替换旧会话；token 泄露的直接影响是隧道被接管，
-  因此 token 管理比 API Key 更敏感。
-- **MVP 非目标**：动态隧道注册、管理 Web UI、同一隧道多 agent 负载均衡、QUIC/WebSocket
-  传输、跨网关联邦均不在当前版本内（见 [DESIGN 第 9 节](DESIGN.md#9-非目标mvp-不做)）。
+- **多会话池**：同一隧道允许多个 agent 并存并轮询分流；token 泄露会让未授权 agent 加入
+  会话池并接收流量，因此需同步轮换网关及全部 agent 的 token。
+- **MVP 非目标**：动态隧道注册、面向公网的管理 Web UI、QUIC/WebSocket
+  传输、跨网关联邦不在当前版本内；本地控制台及同隧道多 agent 已实现（见 [DESIGN 第 9 节](DESIGN.md#9-非目标mvp-不做)）。

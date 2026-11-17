@@ -1,5 +1,7 @@
 # 协议与调用方式
 
+**中文** · [English](en/protocols.md) · [文档目录](README.md)
+
 DivertLink 网关不解析大模型业务 JSON，只做 HTTP 语义级转发，因此 OpenAI、Anthropic、
 vLLM 以及任何 OpenAI/Anthropic 兼容服务（new-api、one-api、LiteLLM 等）的接口都可以
 原样透传。本文说明 base_url 与路径如何拼接、认证头如何处理、如何验证 SSE 流式，

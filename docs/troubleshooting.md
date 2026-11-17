@@ -1,5 +1,7 @@
 # 故障排查
 
+**中文** · [English](en/troubleshooting.md) · [文档目录](README.md)
+
 本文按**症状**组织：先做通用检查，再按 HTTP 状态码、流式、心跳、TLS、ALPN、new-api
 与家庭网络逐项排查。文中的日志关键词为定位线索，具体措辞以你的版本实际日志为准，
 可先用 `grep -Ei` 粗筛再放大。
@@ -223,7 +225,7 @@ warn；504 响应本身不写日志。
 | 系统休眠/断网 | 笔记本合盖、Wi-Fi 切换 | 唤醒后 agent 自动重连；必要时用 `reconnect_min/max` 调整退避 |
 | 时钟偏差 | 证书有效期校验失败（TLS 层） | 启用 NTP；`timedatectl` 检查 |
 | token/id 错误 | 网关日志认证失败 | 统一双端配置并重启 |
-| 第二个 agent 抢占同一隧道 | `/status` 会话变化、日志有替换 | 一隧道只运行一个 agent；轮换 token |
+| 第二个 agent 无法加入同一隧道 | `/status` 的 agents/connected、双方日志与 token | 确认 ID/token 相同且服务能力等价；多 agent 会话会进入池并轮询，泄露 token 时轮换全部 agent |
 
 **重连调试**：家庭端用前台模式观察完整日志；`divertlink agent -c agent.toml --once`
 只建立一次连接（不进入长期重连循环），适合快速判断握手与认证是否正常。

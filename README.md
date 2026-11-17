@@ -1,5 +1,7 @@
 # DivertLink
 
+**中文** · [English](README.en.md) · [文档目录](docs/README.md) · [Releases](https://github.com/Wrste/divertlink/releases)
+
 > **中文**：把运行在家庭宽带上的大模型服务，安全地映射到有固定公网 IP 的服务器上——
 > 家庭端主动建立加密反向隧道，公网侧提供 OpenAI / Anthropic / vLLM 完全兼容的 HTTP(S) 入口。
 >
@@ -23,6 +25,7 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 - [接入 new-api / one-api](#接入-new-api--one-api)
 - [安全摘要](#安全摘要)
 - [性能摘要](#性能摘要)
+- [智能体自动部署](#智能体自动部署)
 - [文档索引](#文档索引)
 - [从源码构建与开发](#从源码构建与开发)
 - [项目状态与非目标](#项目状态与非目标)
@@ -39,7 +42,7 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 - **安全默认**：隧道固定 TLS 1.3 + 隧道 token 认证，可选 mTLS 与证书 SPKI
   pinning；公网入口最低 TLS 版本默认 1.3，可按需降到 1.2 兼容旧客户端；入口 API Key
   认证、限流、体积/并发限制；管理端点只监听 localhost。
-- **稳定**：应用层/传输层心跳可组合、指数退避重连（带 jitter）、会话热替换、
+- **稳定**：应用层/传输层心跳可组合、指数退避重连（带 jitter）、多会话池与故障转移、
   流式空闲超时、优雅退出；单条 TCP 连接多路复用，不受 NAT/CGNAT 空闲回收影响。
 - **简单**：一个静态链接二进制，`divertlink server -c server.toml` /
   `divertlink agent -c agent.toml`；`divertlink init` 一键生成双端配置与证书。
@@ -274,10 +277,19 @@ curl -sS  http://127.0.0.1:9090/metrics   # Prometheus 文本指标
 - 主要瓶颈通常是家庭端 GPU 与上行带宽，而不是网关带宽；SSE 纯文本流量很小。
 - 容量估算、`oha` / `curl` 压测方法、调参建议见 [性能与容量](docs/performance.md)。
 
+## 智能体自动部署
+
+项目附带 [`divertlink-deploy`](skills/divertlink-deploy/SKILL.md) 技能包，支持智能体检查主机、
+安装校验二进制、配置双端 TLS/鉴权、使用 systemd/Docker 部署，并验证指定隧道和 API 入口。
+包含 Python 标准库安装与验证脚本，可独立打包为 ZIP；安装方式和中文任务示例见
+[技能包使用指南](docs/agent-skill.md)。
+
 ## 文档索引
 
 | 文档 | 内容 |
 | --- | --- |
+| [中英文文档目录](docs/README.md) | 中英文主题导航、安装、配置与运维 |
+| [智能体部署技能](docs/agent-skill.md) | 技能安装、自动搭建示例、二进制校验与端到端验证 |
 | [快速开始](docs/quickstart.md) | 从零到公网可用：安装、证书、防火墙、启动、验证 streaming、常见错误 |
 | [配置参考](docs/configuration.md) | `server.toml` / `agent.toml` 全字段（类型、默认值、必填性、说明），最小配置与完整示例 |
 | [协议与调用](docs/protocols.md) | OpenAI / Anthropic / vLLM 的 base_url 拼接、Python SDK 与 curl、认证头、SSE 验证、new-api/one-api 渠道配置 |
@@ -293,7 +305,7 @@ curl -sS  http://127.0.0.1:9090/metrics   # Prometheus 文本指标
 
 ## 从源码构建与开发
 
-需要 Rust 1.88+（`Cargo.toml` 中 `rust-version = "1.88"`）：
+建议使用当前 Rust stable；包声明 MSRV 为 1.88，但锁定依赖可能要求更高版本：
 
 ```bash
 git clone https://github.com/Wrste/divertlink.git
@@ -317,7 +329,8 @@ Windows x86_64 产物。
 
 当前版本 **0.1.0（MVP）**。以下能力不在 MVP 范围（见
 [DESIGN 第 9 节](docs/DESIGN.md#9-非目标mvp-不做)）：动态隧道注册/管理 Web UI、
-ACME 自动签发证书、同一隧道多 agent 负载均衡、QUIC/WebSocket 传输、跨网关联邦。
+ACME 自动签发证书、QUIC/WebSocket 传输、跨网关联邦。
+同一隧道多 agent 负载均衡与故障转移、本地图形控制台已实现。
 WebSocket、gRPC、HTTP/3 请求无法经隧道透传；普通 HTTP/1.1、HTTP/2 与 SSE 不受影响。
 
 欢迎通过 Issue / Pull Request 参与贡献；提交前请确保 `cargo fmt`、`clippy`、

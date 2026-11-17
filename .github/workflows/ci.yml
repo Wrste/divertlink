@@ -80,6 +80,10 @@ jobs:
         run: cargo build --locked
       - name: Run smoke test
         run: ./scripts/smoke.sh -b ./target/debug/divertlink
+      - name: Test deployment skill helpers with real tunnel
+        env:
+          DIVERTLINK_TEST_BINARY: ./target/debug/divertlink
+        run: python3 -m unittest discover -s tests -p 'test_deploy_skill.py' -v
 
   # 部署资产自身的一致性检查：YAML 可解析、install.sh 语法正确、
   # systemd/nginx/Caddy/Dockerfile 关键契约齐全、compose 文件合法。

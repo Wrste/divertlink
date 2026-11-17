@@ -35,3 +35,7 @@ Thumbs.db
 
 # local deploy key for pushing to GitHub (never commit)
 /.deploy/
+
+# Python skill helper caches
+__pycache__/
+*.py[cod]

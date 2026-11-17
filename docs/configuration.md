@@ -1,5 +1,7 @@
 # 配置参考
 
+**中文** · [English](en/configuration.md) · [文档目录](README.md)
+
 本文是 DivertLink 的完整配置参考。字段、类型与默认值以实现中的
 [`src/config.rs`](../src/config.rs) 为唯一事实来源，并与 `assets/server.example.toml`、
 `assets/agent.example.toml`（`init` 生成配置所用的模板）保持一致。
@@ -142,7 +144,7 @@
 ### 2.6 `[[tunnels]]`
 
 静态注册的隧道，与家庭端 `agent.toml` 一一对应：`id` / `token` 必须双端一致。
-每条隧道同一时间只有一个活动会话，新会话会热替换旧会话（用于断线重连）。
+每条隧道可同时保留多个 agent 会话，网关按会话池轮询选择，并在开流失败时切换可用会话。
 
 | 字段 | 类型 | 默认值 | 必填性 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -192,7 +194,7 @@
 | `upstream` | string(URL) | 无 | **必填** | 上游基础地址，必须是带 scheme/host 的绝对 URL，只支持 `http://` 或 `https://`，如 `"http://127.0.0.1:3000"` |
 | `strip_prefix` | boolean | `true` | 可选 | 为 `true` 时转发前剥离 `mount` 前缀；为 `false` 时保留原始路径 |
 | `require_auth` | boolean | `true` | 可选 | 是否要求网关入口 API Key。默认 `true`（与隧道一致，做 Key 校验 + 限流 + 并发限制）；仅当上游（如 new-api）自己完成鉴权时才可设为 `false` |
-| `tls_ca` | string(路径) | 无（系统根证书） | 可选 | 上游为 HTTPS 且使用私有 CA 时的额外 CA |
+| `tls_ca` | string(路径) | 无（内置公共根证书） | 可选 | 上游为 HTTPS 且使用私有 CA 时的额外 CA |
 | `headers` | map[string]string | `{}` | 可选 | 附加到上游请求的静态头，如 `{ "X-DivertLink-Route" = "newapi" }` |
 
 > **鉴权边界（重要）**：`require_auth = true`（默认）时，静态路由与隧道一样要求网关
@@ -228,7 +230,7 @@
 
 | 字段 | 类型 | 默认值 | 必填性 | 说明 |
 | --- | --- | --- | --- | --- |
-| `ca` | string(路径) | 无（系统根证书） | 可选 | 校验网关证书的 CA 文件 PEM；自签部署必须配置（如 `"certs/ca.crt"`）；使用公网 CA 时**删除该行**（写空字符串会在加载 TLS 时读取失败） |
+| `ca` | string(路径) | 无（内置公共根证书） | 可选 | 校验网关证书的 CA 文件 PEM；自签部署必须配置（如 `"certs/ca.crt"`）；使用公网 CA 时**删除该行**（写空字符串会在加载 TLS 时读取失败） |
 | `pin` | string | 无（不启用） | 可选 | SPKI SHA-256 pin（base64 或 hex，也接受 `sha256/...` 前缀），`gen-certs` 会打印；启用后即使 CA 被误签发也可发现中间人。**不要写空字符串**（会被校验拒绝）；证书轮换时需同步更新 |
 | `servername` | string | 取 `server` 的 host | 可选 | TLS SNI/校验名，需与证书 SAN 一致 |
 | `client_cert` | string(路径) | 无（不启用） | 可选 | mTLS 客户端证书 PEM；**仅当网关设置了 `[tls].client_ca` 时需要**，必须与 `client_key` 同时配置。可用 `gen-certs --client` / `init --mtls` 生成 |
@@ -247,7 +249,7 @@
 | `url` | string(URL) | `"http://127.0.0.1:8000"` | 可选（建议显式配置） | 家庭端服务基础地址，必须是 `http://` 或 `https://` 绝对 URL；vLLM `:8000`、Ollama `:11434`、new-api `:3000` |
 | `request_timeout` | string(时长) | `"10m"` | 可选 | 单个上游请求等待响应头的超时；长输出场景应不小于网关侧超时 |
 | `connect_timeout` | string(时长) | `"5s"` | 可选 | 连接上游服务的超时，用于快速发现本地服务未启动 |
-| `tls_ca` | string(路径) | 无（系统根证书） | 可选 | `url` 为 `https` 时校验上游证书的额外 CA；上游用公网证书时删除该行 |
+| `tls_ca` | string(路径) | 无（内置公共根证书） | 可选 | `url` 为 `https` 时校验上游证书的额外 CA；上游用公网证书时删除该行 |
 | `headers` | map[string]string | `{}` | 可选 | 附加到每个上游请求的静态头（如链路追踪头），不要用于存放认证令牌 |
 
 > 响应体流式转发阶段，agent 还有一个**固定 300s** 的 target 响应空闲上限
@@ -424,7 +426,7 @@ divertlink server -c server.toml --check
 
 - 配置在进程**启动时**加载，修改后需重启对应进程生效；当前版本不提供 SIGHUP/热加载，
   请通过 systemd `restart` 或滚动重启完成变更。
-- 变更令牌/证书后，先重启网关，再重启 agent；网关会以会话热替换方式接管 agent 重连。
+- 变更令牌/证书后，先重启网关，再重启 agent；agent 重连后会重新加入网关会话池。
 - 相对证书路径以配置文件所在目录为基准，因此从任意工作目录执行
   `divertlink server -c /etc/divertlink/server.toml` 都能正确定位
   `/etc/divertlink/certs/...`。

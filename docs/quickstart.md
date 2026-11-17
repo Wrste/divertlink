@@ -1,5 +1,7 @@
 # 快速开始
 
+**中文** · [English](en/quickstart.md) · [文档目录](README.md)
+
 本文从零开始，把家庭端的 LLM 服务安全地映射到一台有固定公网 IP 的服务器上，并验证
 非流式与流式调用。安装完成后配置与验证约 10 分钟；熟悉命令后可按 [README 的 30 秒快速开始](../README.md#30-秒快速开始) 精简执行。
 
@@ -212,7 +214,7 @@ divertlink console --open
 
 ### 2.5 从源码安装（所有平台）
 
-尚无 Release、下载不到对应资产或需要修改代码时，使用此方式。
+当前 Release 未提供目标平台资产、下载不到对应资产或需要修改代码时，使用此方式。
 安装 [Git](https://git-scm.com/downloads) 与 [Rust stable](https://rustup.rs/)，
 使用当前 stable 工具链（项目声明 Rust 最低版本为 1.88；锁定依赖可能要求更新版本）。
 源码编译还需要本机链接器与 C/C++ 构建工具，发行包用户无需安装这些工具。
@@ -331,7 +333,7 @@ divertlink console --open
 
 | 现象 | 处理方法 |
 | --- | --- |
-| 下载返回 404 | 检查是否已有 Release、版本标签和资产名；暂无 Release 时按 2.5 从源码安装 |
+| 下载返回 404 | 检查版本标签和实际发布资产名；当前 Release 未提供目标平台时按 2.5 从源码安装 |
 | `command not found` / 无法识别命令 | 按对应章节设置 PATH 并重开终端，或使用二进制绝对路径；Windows 当前目录程序加 `.\` |
 | `Exec format error` / `Bad CPU type` / 此应用无法在你的电脑上运行 | 核对系统与 CPU，重新选择平台资产；不能将 Linux 包放到 macOS 或 Windows 原生环境运行 |
 | SHA256 校验失败 | 停止安装，删除下载的压缩包及校验文件，重新下载同一版本；不要跳过校验 |
@@ -478,7 +480,11 @@ divertlink server -c server.toml
 ```bash
 curl -fsS http://127.0.0.1:9090/healthz
 curl -fsS http://127.0.0.1:9090/readyz
+curl -fsS http://127.0.0.1:9090/status
 ```
+
+`/readyz` 在没有配置隧道或至少一条连接时就绪；多隧道部署必须在 `/status` 中
+确认指定隧道的 `connected = true`，再验证实际 API。
 
 > `http_listen = "127.0.0.1:8080"` 是给本机 nginx/new-api 用的明文入口，不要暴露到公网。
 > 若 443 已被 nginx 占用，可让 nginx 终止公网 TLS 并反代到 `http_listen`，同时给 agent

@@ -1,0 +1,4 @@
+interface:
+  display_name: "DivertLink Deployment"
+  short_description: "Deploy and verify DivertLink gateway and agent"
+  default_prompt: "Use $divertlink-deploy to deploy DivertLink on the requested hosts and verify the tunnel end to end."

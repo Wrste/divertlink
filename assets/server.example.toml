@@ -47,7 +47,8 @@ allow_ips = []
 rate_limit = "600/min"
 max_concurrent = 64
 
-# One tunnel per home agent. The agent token must match its [agent] token.
+# One tunnel per routed service. Equivalent agent replicas may share its ID/token.
+# Each agent token must match its [agent] token.
 [[tunnels]]
 id = "home"
 token = "agt_replace_me_with_a_random_token"

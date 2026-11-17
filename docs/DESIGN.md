@@ -16,7 +16,7 @@
    等全部天然兼容，SSE 流式响应逐块透传、不缓冲。
 2. **安全默认**：隧道强制 TLS 1.3（可降 1.2）+ 双向令牌认证，可选 mTLS、证书 SPKI pinning；
    公网入口 API Key 认证、限流、体积/并发限制、审计日志，管理端点只监听 localhost。
-3. **稳定**：应用层心跳 + 传输层心跳可组合，自动指数退避重连（带 jitter），会话热替换，
+3. **稳定**：应用层心跳 + 传输层心跳可组合，自动指数退避重连（带 jitter），多会话池与故障转移，
    流式空闲超时，优雅退出；单条 TCP 连接多路复用，不受 NAT/CGNAT 空闲回收影响。
 4. **简单**：一个静态链接二进制，`divertlink server -c server.toml` / `divertlink agent -c agent.toml`；
    `divertlink init` 一键生成双端配置与证书。

@@ -1,5 +1,7 @@
 # 图形化客户端：内置控制台（多平台）
 
+**中文** · [English](en/console.md) · [文档目录](README.md)
+
 DivertLink 自带一个**零依赖、跨平台**的图形化控制台。它编译进同一个 `divertlink`
 二进制里，不需要 Node、不需要 Electron/Tauri、不需要额外安装任何运行时；在
 Windows / macOS / Linux 上用浏览器打开即可使用，也可以「安装」成桌面应用（PWA）

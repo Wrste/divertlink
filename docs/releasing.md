@@ -1,5 +1,7 @@
 # 构建、签名与公证
 
+**中文** · [English](en/releasing.md) · [文档目录](README.md)
+
 DivertLink 的 Release 是直接运行的命令行二进制，不依赖 Node.js、Python 或容器运行时。
 Linux 使用 musl 静态链接，macOS 使用原生 target；Windows 仍由 GitHub Actions 构建。
 

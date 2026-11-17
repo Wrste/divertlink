@@ -1,5 +1,7 @@
 # DivertLink 部署与运维指南
 
+**中文** · [English](en/deployment.md) · [文档目录](README.md)
+
 本文面向部署、运维与集成人员，覆盖 gateway（公网服务器）与 agent（家庭侧）的安装、
 三种网络拓扑、证书、systemd / Docker 部署、new-api 对接、防火墙、升级回滚与排障。
 
@@ -150,7 +152,8 @@ agent 日志出现握手/会话建立且无重连错误，即表示隧道可用�
 
 若网关使用自签证书（安装脚本默认生成）而非 Let's Encrypt，需要让 agent 信任它：
 把网关的 `/etc/divertlink/certs/ca.crt` 复制到家庭机的 `/etc/divertlink/certs/ca.crt`，
-并在 `agent.toml` 的 `[tls]` 中启用 `ca = "certs/ca.crt"`（或改用安装时打印的 `tls.pin`）：
+并在 `agent.toml` 的 `[tls]` 中启用 `ca = "certs/ca.crt"`。可额外配置 `tls.pin`，
+但 pin 不替代 CA 校验，自签部署仍需 CA：
 
 ```bash
 sudo install -d -m 0750 -o root -g divertlink /etc/divertlink/certs
@@ -171,6 +174,9 @@ curl -fsS http://127.0.0.1:9090/status
 curl -sS https://llm.example.com/home/v1/models \
   -H "Authorization: Bearer dlk_xxx"
 ```
+
+`/readyz` 在没有配置隧道或至少一条隧道连接时就绪；需在 `/status` 中确认指定 ID 的
+`connected = true`，并逐条验证实际 API。自签入口请求需要 `--cacert /实际路径/ca.crt`。
 
 ### 2.5 部署后自检（scripts/smoke.sh）
 
@@ -505,7 +511,9 @@ docker compose -f deploy/docker-compose.yml logs -f gateway
 - 8080/9090 只发布到 `127.0.0.1`，不要暴露公网。
 - 默认 bridge 网络下网关看到的客户端 IP 是 Docker 网关地址，`allow_ips` /
   按 IP 限流会失真；需要真实 IP 时改用 host 网络（见 compose 文末注释）。
-- healthcheck 请求 `http://127.0.0.1:9090/healthz`，依赖 `admin_listen` 保持回环监听。
+- Compose bridge 模式下，容器内 `http_listen` / `admin_listen` 分别设为
+  `"0.0.0.0:8080"` / `"0.0.0.0:9090"`，使宿主机端口映射可达；
+  **宿主机**的 8080/9090 映射仍必须绑定 `127.0.0.1`。healthcheck 只证明进程存活。
 
 不使用 Compose 的等价命令：
 
@@ -522,7 +530,7 @@ docker run -d --name divertlink-gateway \
   server -c /etc/divertlink/server.toml
 ```
 
-`divertlink/docker-compose.yml` 内附 new-api 上游三种接法的注释；new-api 与 gateway
+`deploy/docker-compose.yml` 内附 new-api 上游三种接法的注释；new-api 与 gateway
 同机/同 compose 网络时，推荐 `[[static_routes]] upstream = "http://new-api:3000"`。
 
 ### 5.3 Docker 注意点
