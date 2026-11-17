@@ -1,7 +1,7 @@
 # 快速开始
 
 本文从零开始，把家庭端的 LLM 服务安全地映射到一台有固定公网 IP 的服务器上，并验证
-非流式与流式调用。全程约 10 分钟；熟悉命令后可按 [README 的 30 秒快速开始](../README.md#30-秒快速开始) 精简执行。
+非流式与流式调用。安装完成后配置与验证约 10 分钟；熟悉命令后可按 [README 的 30 秒快速开始](../README.md#30-秒快速开始) 精简执行。
 
 - [1. 开始前准备](#1-开始前准备)
 - [2. 安装 DivertLink](#2-安装-divertlink)
@@ -41,46 +41,308 @@
 
 ## 2. 安装 DivertLink
 
-### 2.1 使用发行包（推荐）
+- [选择安装方式与平台](#21-选择安装方式与平台)
+- [Linux 发行包](#22-linux-安装发行包)
+- [macOS 发行包](#23-macos-安装发行包)
+- [Windows 发行包](#24-windows-安装发行包)
+- [源码安装（当前可用）](#25-从源码安装所有平台)
+- [Linux systemd 安装](#26-linux-systemd-安装)
+- [验证与常见问题](#27-安装验证与常见问题)
+- [443 端口权限](#28-监听-443-的权限)
 
-从项目 GitHub Releases 页面下载对应平台压缩包，解压后把 `divertlink` 放到
-`PATH`（Linux/macOS）：
+### 2.1 选择安装方式与平台
+
+网关与家庭端**都需要安装**，两端可以使用不同操作系统。同一个可执行文件包含
+`server`、`agent` 和 `console`，无需分别下载服务端和客户端，也无需 Node.js 或 Python。
+
+- 下载入口：[Wrste/divertlink Releases](https://github.com/Wrste/divertlink/releases)。
+- **当前仓库尚无 Release**，请先使用 [2.5 从源码安装](#25-从源码安装所有平台)；
+  下方发行包命令适用于对应版本正式发布之后，不会自动触发发布。
+- 命令中的 `0.1.0` 是版本示例，执行前应在 Releases 确认该版本和资产存在。
+  下载 URL 的标签带 `v`（如 `v0.1.0`），文件名的版本不带 `v`。
+
+| 操作系统 / CPU | Release 资产（`<version>` 替换为实际版本） |
+| --- | --- |
+| Linux Intel / AMD 64 位（`uname -m` 为 `x86_64`） | `divertlink-<version>-x86_64-unknown-linux-musl.tar.gz` |
+| Linux ARM 64 位（`aarch64` / `arm64`） | `divertlink-<version>-aarch64-unknown-linux-musl.tar.gz` |
+| macOS Apple Silicon（M 系列，`arm64`） | `divertlink-<version>-aarch64-apple-darwin.tar.gz` |
+| macOS Intel（`x86_64`） | `divertlink-<version>-x86_64-apple-darwin.tar.gz` |
+| Windows Intel / AMD 64 位 | `divertlink-<version>-x86_64-pc-windows-msvc.zip` |
+
+每个压缩包另有同名 `.sha256` 文件。**压缩包内还有一层同名目录**，二进制不在
+解压目录根部。32 位 Linux/Windows、Windows ARM64 暂无预构建资产；源码构建也需
+目标平台的 Rust 工具链和 C/C++ 编译环境，未列入发行构建矩阵的平台需自行验证。
+
+### 2.2 Linux 安装发行包
+
+适用于 Ubuntu、Debian、Fedora、Rocky Linux、Alpine 等发行版的上述两种架构。
+准备 `bash`、`curl`、`tar` 和 `sha256sum`；Debian/Ubuntu 可执行
+`sudo apt-get update && sudo apt-get install -y ca-certificates curl tar coreutils`。
+以下命令在 **Bash** 中执行，使用用户目录安装，无需 root：
 
 ```bash
-# 以 Linux x86_64 为例，<version> 替换为实际版本号，如 0.1.0
-tar -xzf divertlink-<version>-x86_64-unknown-linux-musl.tar.gz
-sudo install -m 0755 divertlink /usr/local/bin/divertlink
+(
+  set -eu
+  release_version="0.1.0"  # 替换为 Releases 中已有的版本
+  case "$(uname -m)" in
+    x86_64) release_target="x86_64-unknown-linux-musl" ;;
+    aarch64|arm64) release_target="aarch64-unknown-linux-musl" ;;
+    *) echo "暂无该架构的发行包，请从源码构建" >&2; exit 1 ;;
+  esac
+  release_name="divertlink-${release_version}-${release_target}"
+  release_base="https://github.com/Wrste/divertlink/releases/download/v${release_version}"
+  release_dir="$(mktemp -d)"
+  cd "$release_dir"
+  curl -fLO "${release_base}/${release_name}.tar.gz"
+  curl -fLO "${release_base}/${release_name}.tar.gz.sha256"
+  sha256sum -c "${release_name}.tar.gz.sha256"
+  tar -xzf "${release_name}.tar.gz"
+  mkdir -p "$HOME/.local/bin"
+  install -m 0755 "${release_name}/divertlink" "$HOME/.local/bin/divertlink"
+)
+export PATH="$HOME/.local/bin:$PATH"
 divertlink version
 ```
 
-### 2.2 从源码构建
+确认版本输出后，将 `export PATH="$HOME/.local/bin:$PATH"` 添加到 `~/.bashrc`
+（Zsh 用 `~/.zshrc`），重新打开终端后仍可直接调用。也可使用绝对路径
+`~/.local/bin/divertlink version`。
 
-需要 Rust 1.88 或更新（`Cargo.toml` 的 `rust-version = "1.88"`）：
+如需供所有用户或 systemd 使用，在上述安装后执行：
 
 ```bash
-git clone https://github.com/divertlink/divertlink.git
+sudo install -m 0755 "$HOME/.local/bin/divertlink" /usr/local/bin/divertlink
+/usr/local/bin/divertlink version
+```
+
+要创建专用服务用户、配置与开机自启，见 [2.6 Linux systemd 安装](#26-linux-systemd-安装)。
+
+### 2.3 macOS 安装发行包
+
+打开「终端」，执行 `uname -m`：M 系列原生终端输出 `arm64`，Intel 输出 `x86_64`。
+M 系列若在 Rosetta 终端中显示 `x86_64`，建议切回原生终端安装 ARM 版本。
+系统自带的 `curl`、`tar`、`shasum` 即可完成安装：
+
+```bash
+(
+  set -eu
+  release_version="0.1.0"  # 替换为 Releases 中已有的版本
+  case "$(uname -m)" in
+    arm64) release_target="aarch64-apple-darwin" ;;
+    x86_64) release_target="x86_64-apple-darwin" ;;
+    *) echo "暂无该架构的发行包，请从源码构建" >&2; exit 1 ;;
+  esac
+  release_name="divertlink-${release_version}-${release_target}"
+  release_base="https://github.com/Wrste/divertlink/releases/download/v${release_version}"
+  release_dir="$(mktemp -d)"
+  cd "$release_dir"
+  curl -fLO "${release_base}/${release_name}.tar.gz"
+  curl -fLO "${release_base}/${release_name}.tar.gz.sha256"
+  shasum -a 256 -c "${release_name}.tar.gz.sha256"
+  tar -xzf "${release_name}.tar.gz"
+  mkdir -p "$HOME/.local/bin"
+  install -m 0755 "${release_name}/divertlink" "$HOME/.local/bin/divertlink"
+)
+export PATH="$HOME/.local/bin:$PATH"
+divertlink version
+```
+
+将 `export PATH="$HOME/.local/bin:$PATH"` 添加到 `~/.zshrc`（macOS Bash 登录终端用 `~/.bash_profile`），
+重新打开终端验证。也可用 `~/.local/bin/divertlink` 的绝对路径启动。
+如果系统提示无法验证开发者，先确认文件来自上述仓库且 SHA256 校验通过，再按
+「系统设置 → 隐私与安全性」中的提示处理；不要全局关闭 Gatekeeper。
+
+安装完成后运行 `divertlink console --open` 即可打开图形控制台。它是浏览器界面，
+不是 `.app` 安装包；使用 PWA 与双击启动器的方法见 [图形化客户端](console.md)
+和 [桌面启动器](../scripts/desktop/README.md)。
+
+### 2.4 Windows 安装发行包
+
+适用于 64 位 Intel / AMD Windows。在「设置 → 系统 → 系统信息」确认系统类型，
+打开 **PowerShell 5.1 或更新版本**，无需管理员权限。下面安装到
+`%LOCALAPPDATA%\DivertLink\bin`：
+
+```powershell
+$ErrorActionPreference = "Stop"
+$releaseVersion = "0.1.0"  # 替换为 Releases 中已有的版本
+$releaseName = "divertlink-$releaseVersion-x86_64-pc-windows-msvc"
+$releaseBase = "https://github.com/Wrste/divertlink/releases/download/v$releaseVersion"
+$releaseDir = Join-Path ([IO.Path]::GetTempPath()) ("divertlink-" + [guid]::NewGuid())
+$installDir = Join-Path $env:LOCALAPPDATA "DivertLink\bin"
+New-Item -ItemType Directory -Force -Path $releaseDir, $installDir | Out-Null
+$archivePath = Join-Path $releaseDir "$releaseName.zip"
+$checksumPath = "$archivePath.sha256"
+Invoke-WebRequest -UseBasicParsing "$releaseBase/$releaseName.zip" -OutFile $archivePath
+Invoke-WebRequest -UseBasicParsing "$releaseBase/$releaseName.zip.sha256" -OutFile $checksumPath
+$expectedHash = ((Get-Content $checksumPath -Raw).Trim() -split '\s+')[0]
+$actualHash = (Get-FileHash $archivePath -Algorithm SHA256).Hash
+if ($actualHash -ine $expectedHash) { throw "SHA256 校验失败，停止安装" }
+Expand-Archive -Path $archivePath -DestinationPath $releaseDir
+Copy-Item (Join-Path $releaseDir "$releaseName\divertlink.exe") $installDir -Force
+$env:Path = "$installDir;$env:Path"
+divertlink version
+divertlink console --open
+```
+
+最后一条命令会打开默认浏览器；按 `Ctrl+C` 停止控制台。配置 agent 时，在 PowerShell
+使用 `divertlink agent -c "C:\实际目录\agent.toml"`；使用当前目录里的程序时必须加
+`.\`，例如 `.\divertlink.exe version`。
+
+要让新终端也能找到程序，打开「编辑账户的环境变量 → 用户变量 → Path → 编辑 → 新建」，
+添加 `%LOCALAPPDATA%\DivertLink\bin`，保存后重新打开 PowerShell。无需修改系统 Path。
+也可始终使用绝对路径：
+
+```powershell
+& "$env:LOCALAPPDATA\DivertLink\bin\divertlink.exe" version
+```
+
+如提示缺少 `VCRUNTIME140.dll` 等运行库，从
+[微软官方页面](https://learn.microsoft.com/zh-cn/cpp/windows/latest-supported-vc-redist)
+安装 x64 Visual C++ Redistributable 后重试。
+
+### 2.5 从源码安装（所有平台）
+
+尚无 Release、下载不到对应资产或需要修改代码时，使用此方式。
+安装 [Git](https://git-scm.com/downloads) 与 [Rust stable](https://rustup.rs/)，
+使用当前 stable 工具链（项目声明 Rust 最低版本为 1.88；锁定依赖可能要求更新版本）。
+源码编译还需要本机链接器与 C/C++ 构建工具，发行包用户无需安装这些工具。
+
+| 平台 | 编译前准备 |
+| --- | --- |
+| Ubuntu / Debian | `sudo apt-get update && sudo apt-get install -y build-essential git curl ca-certificates`，然后按 rustup 官网安装 Rust |
+| Fedora | `sudo dnf install gcc gcc-c++ make git curl`，然后按 rustup 官网安装 Rust |
+| Alpine | `sudo apk add build-base git curl ca-certificates`，按 rustup 官网安装适用于本机的 Rust 工具链 |
+| macOS | 执行 `xcode-select --install` 安装 Command Line Tools，然后按 rustup 官网安装 Rust |
+| Windows | 安装 [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)，选择「使用 C++ 的桌面开发」（含 MSVC 与 Windows SDK），然后运行 rustup 官网的 `rustup-init.exe`，选择默认 MSVC 工具链 |
+
+Linux / macOS 在安装好上表依赖后，可按 rustup 官方方式下载并运行安装器：
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup-init.sh
+sh rustup-init.sh --default-toolchain stable
+```
+
+按提示选择默认安装，完成后重新打开终端；如果系统已有 Rust，执行
+`rustup update stable`。Windows 在安装器中同样选择 stable/MSVC，安装完成后重开
+PowerShell；Git 未在 PATH 中时重开终端或检查 Git 安装选项。
+
+装好 Rust 后重新打开终端，执行以下命令（Windows 使用 PowerShell）：
+
+```text
+git --version
+rustc --version
+cargo --version
+git clone https://github.com/Wrste/divertlink.git
 cd divertlink
 cargo build --release --locked
-sudo install -m 0755 target/release/divertlink /usr/local/bin/divertlink
 ```
 
-本仓库已内置本地工具链时，可先执行 `. ./scripts/env.sh` 再构建；该脚本仅用于
-仓库内开发环境，不影响最终用户安装方式。
-
-### 2.3 监听 443 的权限
-
-Linux 上非 root 进程绑定 443 需要能力授权，任选其一：
+Linux / macOS 的产物为 `target/release/divertlink`，复制到用户目录并验证：
 
 ```bash
-# 方式一：给二进制授予绑定低端口能力
-sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/divertlink
-
-# 方式二（生产推荐）：用 systemd 的 AmbientCapabilities，见 docs/deployment.md
-# 方式三：先用非特权端口演练，例如 8443（客户端 URL 相应改端口）
+mkdir -p "$HOME/.local/bin"
+install -m 0755 target/release/divertlink "$HOME/.local/bin/divertlink"
+export PATH="$HOME/.local/bin:$PATH"
+divertlink version
 ```
 
-> `setcap` 授权会在升级二进制后失效，需要在每次升级后重新执行；生产部署建议使用
-> systemd 单元或容器，具体见 [部署文档](deployment.md)。
+PATH 的永久设置见对应平台章节；Linux 全局安装也可使用
+`sudo install -m 0755 target/release/divertlink /usr/local/bin/divertlink`。
+Windows 的产物为 `target\release\divertlink.exe`，在仓库目录执行：
+
+```powershell
+$installDir = Join-Path $env:LOCALAPPDATA "DivertLink\bin"
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+Copy-Item .\target\release\divertlink.exe $installDir -Force
+$env:Path = "$installDir;$env:Path"
+divertlink version
+```
+
+本仓库已有本地工具链时，开发者可在 Bash 中先执行 `. ./scripts/env.sh`；普通用户按
+rustup 官方方式安装即可。编译遇到网络超时请检查 crates.io 访问，遇到链接器缺失请先
+补齐上表中的构建工具；不要删除 `Cargo.lock` 来绕过 `--locked`。
+
+### 2.6 Linux systemd 安装
+
+仅适用于 **Linux + systemd + root/sudo 权限**，macOS、Windows、WSL 中未启用
+systemd 的环境应使用上述手工安装。需先取得完整仓库，因为脚本会读取
+`deploy/systemd/` 中的服务模板，不能只下载 `install.sh` 单个文件执行。
+
+在克隆的仓库根目录运行；目前没有 Release 时，先完成上一节源码构建，再离线安装：
+
+```bash
+# 网关：安装本地编译好的二进制，并生成配置与自签证书
+sudo ./deploy/install.sh --server --binary ./target/release/divertlink \
+  --domain gateway.example.com
+
+# 家庭端：在家庭机器的仓库执行，token 必须替换为网关打印的隧道 token
+# 先生成配置，按第 5 节配置 target、CA/pin 后再启动
+sudo ./deploy/install.sh --agent --binary ./target/release/divertlink \
+  --gateway gateway.example.com:443 --token 'agt_REPLACE_WITH_GATEWAY_TOKEN' --no-start
+```
+
+Release 发布后，可将 `--binary ./target/release/divertlink` 换成
+`--version 0.1.0`（实际发布版本），脚本会自动选择架构、下载并校验压缩包。
+默认二进制为 `/usr/local/bin/divertlink`，配置为 `/etc/divertlink/server.toml` 或
+`/etc/divertlink/agent.toml`。脚本会启用开机自启，默认立即启动；`--no-start` 只启用，
+暂不启动。agent 配置完成后执行：
+
+```bash
+sudo divertlink check -c /etc/divertlink/agent.toml
+sudo systemctl start divertlink-agent
+sudo systemctl status divertlink-agent
+sudo journalctl -u divertlink-agent -f
+```
+
+完整生产部署、证书替换与升级回滚见 [部署文档](deployment.md)。Docker 用户见
+[Docker 部署](deployment.md#5-docker-部署)，可以从仓库本地构建镜像；预构建镜像
+只有在维护者启用 GHCR 并发布成功后才可用。
+
+### 2.7 安装验证与常见问题
+
+在网关与家庭端分别执行：
+
+```text
+divertlink version
+divertlink --help
+divertlink console --open
+```
+
+版本命令应输出版本信息，帮助应列出 `server` / `agent` / `console` 等子命令。
+桌面环境会打开 `http://127.0.0.1:17653/`；若未自动打开，请在本机浏览器输入此地址。
+无桌面的服务器用 `version` 与 `--help` 验证即可。`console` 会持续占用当前终端，
+按 `Ctrl+C` 退出；安装成功后继续第 3 节生成配置，或用控制台创建项目。
+
+| 现象 | 处理方法 |
+| --- | --- |
+| 下载返回 404 | 检查是否已有 Release、版本标签和资产名；暂无 Release 时按 2.5 从源码安装 |
+| `command not found` / 无法识别命令 | 按对应章节设置 PATH 并重开终端，或使用二进制绝对路径；Windows 当前目录程序加 `.\` |
+| `Exec format error` / `Bad CPU type` / 此应用无法在你的电脑上运行 | 核对系统与 CPU，重新选择平台资产；不能将 Linux 包放到 macOS 或 Windows 原生环境运行 |
+| SHA256 校验失败 | 停止安装，删除下载的压缩包及校验文件，重新下载同一版本；不要跳过校验 |
+| `Permission denied` | Linux/macOS 执行 `chmod +x /实际路径/divertlink`，并确认所在文件系统允许执行 |
+| `Address already in use` | 先停止已有进程；控制台可换端口：`divertlink console --listen 127.0.0.1:17654 --open` |
+
+升级时先停止相关进程或服务，再按同一平台步骤安装新版本。配置和证书保存在项目目录
+或 `/etc/divertlink` 中，应单独备份；替换二进制后重新执行 `version`、`check -c` 并启动。
+用户目录安装的卸载方法是停止进程后删除对应的 `divertlink` / `divertlink.exe`，再移除
+添加的 PATH 项。systemd 用户需先停止并禁用对应服务，再移除服务单元与二进制；
+配置、证书和状态目录应在确认不再需要后单独清理。
+
+### 2.8 监听 443 的权限
+
+安装二进制不代表已经配置端口权限。Linux 上非 root 进程绑定 443 可选：
+
+```bash
+# 全局安装的二进制：授予绑定低端口能力
+sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/divertlink
+
+# 生产推荐：使用 systemd 单元中的 AmbientCapabilities，见部署文档
+# 初次演练也可改用 8443（同时修改 tunnel_listen、ingress_listen、agent 地址与客户端 URL）
+```
+
+`setcap` 授权会在升级二进制后失效，需重新执行。macOS 非特权进程可先用 8443 演练；
+Windows 若启动失败请检查端口占用与防火墙规则。agent 主动出站，不需要在家庭侧开放
+443 或创建入站端口映射。
 
 ## 3. 生成配置与证书
 
@@ -89,6 +351,14 @@ sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/divertlink
 
 ```bash
 mkdir -p ~/divertlink && cd ~/divertlink
+divertlink init --role both --domain gateway.example.com
+```
+
+Windows 网关在 PowerShell 中改用以下建目录命令，其余 `divertlink` 子命令相同：
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\divertlink" | Out-Null
+Set-Location "$env:USERPROFILE\divertlink"
 divertlink init --role both --domain gateway.example.com
 ```
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=DivertLink gateway (public LLM reverse tunnel server)
-Documentation=https://github.com/divertlink/divertlink/blob/main/docs/deployment.md
+Documentation=https://github.com/Wrste/divertlink/blob/main/docs/deployment.md
 After=network-online.target
 Wants=network-online.target
 # 连续快速失败时停止重试，避免证书缺失/配置错误导致无限重启噪音

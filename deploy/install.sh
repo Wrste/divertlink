@@ -16,7 +16,7 @@
 # 前提：Linux + systemd + root 权限；release 资产命名见 .github/workflows/release.yml。
 set -euo pipefail
 
-readonly GITHUB_REPOSITORY="divertlink/divertlink"
+readonly GITHUB_REPOSITORY="Wrste/divertlink"
 readonly RELEASE_DOWNLOAD_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download"
 readonly LATEST_RELEASE_API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest"
 UNIT_DIR_DEFAULT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/systemd"

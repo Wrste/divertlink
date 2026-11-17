@@ -1,6 +1,6 @@
 [Unit]
 Description=DivertLink agent (home-side encrypted LLM reverse tunnel client)
-Documentation=https://github.com/divertlink/divertlink/blob/main/docs/deployment.md
+Documentation=https://github.com/Wrste/divertlink/blob/main/docs/deployment.md
 After=network-online.target
 Wants=network-online.target
 # agent 自身有指数退避重连；这里只防止进程级连续崩溃

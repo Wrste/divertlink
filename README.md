@@ -15,6 +15,7 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 
 - [特性](#特性)
 - [架构](#架构)
+- [安装 DivertLink](#安装-divertlink)
 - [30 秒快速开始](#30-秒快速开始)
 - [图形化客户端](#图形化客户端内置控制台)
 - [命令行速查](#命令行速查)
@@ -76,6 +77,26 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 | 隧道 + mount | `https://gateway.example.com/home/v1/chat/completions` | 家庭端 `/v1/chat/completions` |
 | 隧道 + Host 路由 | `https://home.llm.example.com/v1/chat/completions` | 家庭端 `/v1/chat/completions` |
 | 静态路由 | `https://gateway.example.com/newapi/v1/chat/completions` | 本机 new-api `/v1/chat/completions` |
+
+## 安装 DivertLink
+
+网关与家庭端都要安装，两端可以使用不同操作系统。同一个可执行文件包含
+`server`、`agent` 和浏览器控制台 `console`。
+
+| 平台 | 安装说明 |
+| --- | --- |
+| Linux x86_64 / ARM64 | [下载、SHA256 校验、解压、用户目录或全局安装](docs/quickstart.md#22-linux-安装发行包) |
+| macOS Apple Silicon / Intel | [选择芯片版本、安装、配置 PATH](docs/quickstart.md#23-macos-安装发行包) |
+| Windows x64 | [PowerShell 下载、校验、安装、设置用户 PATH](docs/quickstart.md#24-windows-安装发行包) |
+| 从源码安装 | [各平台编译依赖、Rust 工具链与安装步骤](docs/quickstart.md#25-从源码安装所有平台) |
+| Linux 开机自启 | [systemd 安装脚本、本地二进制安装与服务验证](docs/quickstart.md#26-linux-systemd-安装) |
+| Docker | [本地构建镜像与 Compose 部署](docs/deployment.md#5-docker-部署) |
+
+下载入口：[GitHub Releases](https://github.com/Wrste/divertlink/releases)。
+**当前尚无 Release，请先按源码安装步骤构建**；发行包命令需等对应版本发布后使用。
+安装后运行 `divertlink version`、`divertlink --help` 验证；桌面用户可运行
+`divertlink console --open` 打开图形界面，再继续下方配置步骤。
+常见安装问题见[快速开始第 2.7 节](docs/quickstart.md#27-安装验证与常见问题)。
 
 ## 30 秒快速开始
 
@@ -269,7 +290,7 @@ curl -sS  http://127.0.0.1:9090/metrics   # Prometheus 文本指标
 需要 Rust 1.88+（`Cargo.toml` 中 `rust-version = "1.88"`）：
 
 ```bash
-git clone https://github.com/divertlink/divertlink.git
+git clone https://github.com/Wrste/divertlink.git
 cd divertlink
 cargo build --release --locked          # 产物：target/release/divertlink
 cargo fmt --check
@@ -279,6 +300,7 @@ cargo run -- console --open   # 内置图形控制台（可选）
 ```
 
 本仓库已内置本地工具链时，可先执行 `. ./scripts/env.sh` 再运行 cargo 命令。
+各平台构建依赖与二进制安装方法见[源码安装](docs/quickstart.md#25-从源码安装所有平台)。
 项目为单 crate；`src/` 目录划分（config、tls、protocol、registry、httpfwd、server、
 agent 等）见 [DESIGN 第 3 节](docs/DESIGN.md#3-仓库结构单-crate)。
 CI 会在 Linux/macOS/Windows 上执行测试矩阵（fmt、clippy、doc 检查在 Linux 上运行），

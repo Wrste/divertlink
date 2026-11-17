@@ -27,7 +27,7 @@ name: divertlink
 
 services:
   gateway:
-    image: ghcr.io/divertlink/divertlink:${DIVERTLINK_VERSION:-latest}
+    image: ghcr.io/wrste/divertlink:${DIVERTLINK_VERSION:-latest}
     restart: unless-stopped
     command: ["server", "-c", "/etc/divertlink/server.toml"]
     read_only: true

@@ -13,7 +13,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0)
-IMAGE ?= ghcr.io/divertlink/divertlink
+IMAGE ?= ghcr.io/wrste/divertlink
 TAG ?= $(VERSION)
 
 ifeq ($(shell command -v cargo 2>/dev/null),)
@@ -77,7 +77,7 @@ docker: ## 构建当前平台容器镜像
 	docker build \
 		--label "org.opencontainers.image.title=DivertLink" \
 		--label "org.opencontainers.image.version=$(VERSION)" \
-		--label "org.opencontainers.image.source=https://github.com/divertlink/divertlink" \
+		--label "org.opencontainers.image.source=https://github.com/Wrste/divertlink" \
 		-t $(IMAGE):$(TAG) .
 
 docker-multiarch: ## 构建 amd64+arm64 镜像（本地验证，不推送）

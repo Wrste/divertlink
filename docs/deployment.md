@@ -58,6 +58,9 @@ agent **主动出站**连接 gateway，因此家庭侧不需要公网 IP、端�
 - 客户端：new-api / one-api / OpenAI SDK / Anthropic SDK 等。
 - 部署后自检：`scripts/smoke.sh` 需要 bash、curl、python3（仅自检使用，不进入运行时）。
 
+Windows、macOS 与 Linux 的下载、校验、PATH 和源码构建步骤见
+[多平台安装指南](quickstart.md#2-安装-divertlink)。本篇 systemd 示例适用于 Linux。
+
 ---
 
 ## 2. 快速开始（单端口 443 共用）
@@ -65,10 +68,14 @@ agent **主动出站**连接 gateway，因此家庭侧不需要公网 IP、端�
 以下假设网关域名 `llm.example.com`、版本 `0.1.0`、agent 隧道 id `home`、mount `/home`。
 单端口 ALPN 共用模式不需要 nginx/Caddy。
 
+**当前仓库尚无 Release**，下面的 `--version` 在线安装示例需等对应版本发布后使用。
+目前请按[源码安装](quickstart.md#25-从源码安装所有平台)构建，再将
+`--version 0.1.0` 替换为 `--binary ./target/release/divertlink`。
+
 ### 2.1 在公网服务器安装 gateway
 
 ```bash
-git clone https://github.com/divertlink/divertlink.git
+git clone https://github.com/Wrste/divertlink.git
 cd divertlink
 sudo ./deploy/install.sh --server --version 0.1.0 --domain llm.example.com
 ```
@@ -119,7 +126,7 @@ sudo sed -n 's/^token = "\([^"]*\)".*/\1/p' /etc/divertlink/server.toml | head -
 在家庭机器上：
 
 ```bash
-git clone https://github.com/divertlink/divertlink.git
+git clone https://github.com/Wrste/divertlink.git
 cd divertlink
 sudo ./deploy/install.sh --agent --version 0.1.0 \
   --gateway llm.example.com:443 \
@@ -452,16 +459,17 @@ agent 侧把 `server` 换成 `agent`；`divertlink agent -c agent.toml --once` �
 内置静态 busybox 仅用于健康检查。
 
 ```bash
-# 本地构建（当前平台）
-make docker
+# 本地构建（当前平台），标签与下方 Compose 默认值一致
+make docker TAG=latest
 
 # 多架构构建（需 buildx；CI 的 release.yml 会按需推送到 ghcr）
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/divertlink/divertlink:dev .
+  -t ghcr.io/wrste/divertlink:dev .
 ```
 
 可选：在 GitHub 仓库 Settings → Variables 设置 `ENABLE_GHCR=true`，
 打 `v*.*.*` tag 后 release 工作流会推送 `ghcr.io/<owner>/divertlink` 多架构镜像。
+未发布镜像时先执行上面的本地构建，再运行 Compose；不要直接拉取不存在的远程版本。
 
 ### 5.2 Compose 部署 gateway
 
@@ -508,7 +516,7 @@ docker run -d --name divertlink-gateway \
   -p 443:443 -p 127.0.0.1:8080:8080 -p 127.0.0.1:9090:9090 \
   -v "$PWD/deploy/config:/etc/divertlink:ro" \
   -v "$PWD/deploy/certs:/etc/divertlink/certs:ro" \
-  ghcr.io/divertlink/divertlink:latest \
+  ghcr.io/wrste/divertlink:latest \
   server -c /etc/divertlink/server.toml
 ```
 

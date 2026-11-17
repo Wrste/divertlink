@@ -5,7 +5,7 @@
 # 多架构构建（buildx 会为每个目标平台选用对应架构的 rust:*-alpine 构建器；
 # 跨架构构建时该构建器经 QEMU 模拟运行，因此耗时明显高于同架构构建）：
 #   docker buildx build --platform linux/amd64,linux/arm64 \
-#     -t ghcr.io/divertlink/divertlink:dev .
+#     -t ghcr.io/wrste/divertlink:dev .
 # 单架构本地构建：
 #   docker build -t divertlink:dev .
 #

@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.88"
 description = "DivertLink - a secure, high-performance LLM reverse tunnel for exposing home-hosted models behind a fixed public IP, with a built-in cross-platform web console"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/divertlink/divertlink"
+repository = "https://github.com/Wrste/divertlink"
 readme = "README.md"
 keywords = ["llm", "reverse-proxy", "tunnel", "openai", "anthropic"]
 # Built-in GUI lives in `console` (embedded static assets); no extra runtime needed.
