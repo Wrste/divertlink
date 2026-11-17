@@ -1,0 +1,58 @@
+[Unit]
+Description=DivertLink agent (home-side encrypted LLM reverse tunnel client)
+Documentation=https://github.com/divertlink/divertlink/blob/main/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+# agent 自身有指数退避重连；这里只防止进程级连续崩溃
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=divertlink
+Group=divertlink
+# 配置中的相对 CA 路径（certs/ca.crt）以 /etc/divertlink 为基准
+WorkingDirectory=/etc/divertlink
+ExecStart=/usr/local/bin/divertlink agent -c /etc/divertlink/agent.toml
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+
+# 可选环境变量（DIVERTLINK_SERVER / DIVERTLINK_TOKEN / DIVERTLINK_ID 等，见 docs/DESIGN.md §5.2）
+EnvironmentFile=-/etc/divertlink/agent.env
+
+# agent 只发起出站连接（>=1024 临时端口），无需任何 capability
+AmbientCapabilities=
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RemoveIPC=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# 仅状态目录可写；配置与 CA/证书保持只读
+ReadWritePaths=/var/lib/divertlink
+StateDirectory=divertlink
+StateDirectoryMode=0750
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

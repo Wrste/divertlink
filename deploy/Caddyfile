@@ -1,0 +1,73 @@
+# DivertLink 前置 Caddy 示例（自动 ACME 终止 TLS，回源到 http_listen）
+#
+# 适用拓扑：
+#   公网 443 -> Caddy(TLS) -> DivertLink http_listen 127.0.0.1:8080
+# 该模式下 gateway 的配置建议：
+#   [server]
+#   http_listen = "127.0.0.1:8080"      # 明文入口，只给本机 Caddy 用
+#   tunnel_listen = "0.0.0.0:8443"      # 同机 Caddy 占用 443，agent 改连 8443
+#   ingress_listen = "0.0.0.0:8443"      # 与 tunnel 共用 8443，按 ALPN 分流
+# Caddy 自动 HTTPS 需要 80/443 可达；若 Caddy 与 gateway 不在同一台机器，
+# gateway 的 tunnel_listen 可保持 443，只需改下方 reverse_proxy 的目标地址。
+#
+# 安装：
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#   # 修改域名后：
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# 注意：
+#   - 不要对本站点启用 encode（压缩会缓冲 SSE 流式响应）。
+#   - 单网关场景不需要 Caddy；gateway 自身 443 的 ALPN 复用模式直接暴露即可。
+#   - 若 443 必须与其它站点共用且网关要自己终止 TLS，Caddy 需 xcaddy 编译
+#     layer4 插件做纯 TCP 透传（不终止 TLS），写法为 layer4 的 proxy 指令；
+#     该插件不在官方二进制内，非必需场景不要引入。
+
+llm.example.com {
+    # 自动申请/续期 Let's Encrypt 证书（默认，无需显式 tls 指令）。
+    # 使用已有证书时改为：
+    #   tls /etc/divertlink/certs/server.crt /etc/divertlink/certs/server.key
+    # 使用内部自签（仅调试）时改为：
+    #   tls internal
+
+    # 与 server.toml 的 [limits].max_request_bytes = "64MiB" 保持一致
+    request_body {
+        max_size 64MB
+    }
+
+    reverse_proxy 127.0.0.1:8080 {
+        # SSE / 流式：-1 表示每次写入后立即 flush，不做响应缓冲
+        flush_interval -1
+
+        # 大模型长请求：与 [limits].request_timeout（10m）对齐
+        transport http {
+            dial_timeout 10s
+            response_header_timeout 600s
+            read_timeout 600s
+            write_timeout 600s
+        }
+
+        # Caddy 默认自动设置 X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host。
+        # 真实客户端 IP：gateway 默认不信任该头；Caddy 与 gateway 同机/可信时，
+        # 在 server.toml 的 [server] 设置 trust_proxy = true（allow_ips/限流/审计才准确）。
+        # 若 Caddy 前面还有一层代理，可显式覆盖以确保网关看到真实 Host：
+        # header_up Host {upstream_hostport}   # 一般不需要
+        # header_up X-Forwarded-Host {host}
+    }
+
+    # 响应头统一由网关返回（含 SSE），Caddy 只补 HSTS 等静态安全头
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+
+    # 按 Host 路由多个隧道域名时，可用通配符站点块（需 DNS challenge 的插件）：
+    # *.llm.example.com {
+    #     tls {
+    #         dns cloudflare {env.CF_API_TOKEN}
+    #     }
+    #     reverse_proxy 127.0.0.1:8080 {
+    #         flush_interval -1
+    #     }
+    # }
+}

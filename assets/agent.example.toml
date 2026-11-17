@@ -1,0 +1,55 @@
+# DivertLink home agent configuration example.
+# Run on the machine that hosts the model server (vLLM / Ollama / LM Studio / new-api).
+# The agent dials out to the gateway, so no port forwarding or public IP is required.
+
+[agent]
+# Must match the [[tunnels]] id configured on the gateway.
+id = "home"
+# Gateway TLS endpoint: host:port, tls://host:port or https://host:port.
+server = "gateway.example.com:443"
+# Shared secret; must match [[tunnels]] token on the gateway.
+# You can also pass it through the DIVERTLINK_TOKEN environment variable.
+token = "agt_replace_me_with_a_random_token"
+heartbeat = "5s"
+heartbeat_timeout = "15s"
+# app | transport | both | none
+heartbeat_mode = "app"
+connect_timeout = "10s"
+max_inflight = 128
+reconnect_min = "1s"
+reconnect_max = "60s"
+reconnect_jitter = 0.3
+protocols = ["openai", "anthropic", "vllm"]
+
+[tls]
+# CA bundle used to verify the gateway certificate.
+# - Let's Encrypt / public CA: leave empty to use the system trust store.
+# - Self-signed deployment: point at the generated certs/ca.crt.
+# ca = "certs/ca.crt"
+# Optional SPKI pin (base64 or hex SHA-256). Printed by `divertlink gen-certs`.
+# pin = ""
+# TLS SNI; defaults to the host part of agent.server.
+# servername = "gateway.example.com"
+# Client certificate for mutual TLS. Only needed when the gateway sets tls.client_ca;
+# generate it with `divertlink gen-certs --client` or `divertlink init --mtls`.
+# client_cert = "certs/client.crt"
+# client_key = "certs/client.key"
+# Debug only: never enable this in production.
+insecure = false
+
+[target]
+# Local OpenAI-compatible server. The gateway forwards `/v1/...` paths untouched.
+#   vLLM:     http://127.0.0.1:8000
+#   Ollama:   http://127.0.0.1:11434
+#   LM Studio:http://127.0.0.1:1234
+#   new-api:  http://127.0.0.1:3000
+url = "http://127.0.0.1:8000"
+request_timeout = "10m"
+connect_timeout = "5s"
+# Extra CA bundle if target.url uses HTTPS with a private certificate.
+# tls_ca = "certs/target-ca.crt"
+headers = {}
+
+[log]
+level = "info"
+format = "text"

@@ -1,0 +1,78 @@
+# DivertLink gateway (server) configuration example.
+# Every value below is optional except the tunnels and API keys you actually use;
+# `divertlink server -c server.toml` validates the file before binding sockets.
+
+[server]
+name = "divertlink-gateway"
+# Agent-facing TLS listener. Agents always connect over TLS.
+tunnel_listen = "0.0.0.0:443"
+# Public HTTPS ingress. Set to the same address as tunnel_listen to share :443
+# (the process demultiplexes by TLS ALPN: "divertlink/1" = tunnel, h2/http1.1 = API).
+ingress_listen = "0.0.0.0:443"
+# Optional plaintext ingress for a local nginx/Caddy/new-api on the same host.
+# Keep it on loopback. Set to "off" to disable the listener entirely.
+http_listen = "127.0.0.1:8080"
+# Health/readiness/metrics/status. Always keep this on loopback or a private network.
+# Set to "off" to disable. All four listener fields accept "off"/false.
+admin_listen = "127.0.0.1:9090"
+# Trust X-Forwarded-For from a trusted local reverse proxy (default false).
+trust_proxy = false
+
+[tls]
+cert = "certs/server.crt"
+key = "certs/server.key"
+# Uncomment to require mutual TLS for agents. Requires tunnel_listen != ingress_listen.
+# client_ca = "certs/ca.crt"
+min_version = "1.3"
+
+[limits]
+max_request_bytes = "64MiB"
+request_timeout = "10m"
+stream_idle_timeout = "120s"
+header_read_timeout = "10s"
+max_streams_per_tunnel = 256
+max_connections = 1024
+
+[log]
+level = "info"
+format = "text"
+
+# Public API keys. Clients send `Authorization: Bearer <key>` or `x-api-key: <key>`.
+# Create a key with: divertlink token --prefix dlk_
+[[api_keys]]
+name = "newapi"
+key = "dlk_replace_me_with_a_random_token"
+allow_tunnels = []
+allow_ips = []
+rate_limit = "600/min"
+max_concurrent = 64
+
+# One tunnel per home agent. The agent token must match its [agent] token.
+[[tunnels]]
+id = "home"
+token = "agt_replace_me_with_a_random_token"
+mount = "/home"
+hosts = []
+default = false
+protocols = ["openai", "anthropic", "vllm"]
+# Leave empty to forward the client's own Authorization / x-api-key to the home
+# server (useful when vLLM runs with --api-key or when a local new-api verifies keys).
+upstream_api_key = ""
+upstream_auth_header = "passthrough"
+# Health checks bypass API key auth (they still need to reach this tunnel).
+public_paths = ["/health"]
+max_streams = 128
+request_timeout = "10m"
+enabled = true
+
+# Optional: direct reverse proxy to a platform such as new-api running on this host.
+# Access it at https://gateway.example.com/newapi/... (mount prefix is stripped).
+# require_auth = true (default) enforces this gateway's API key, exactly like tunnels;
+# set it to false only when new-api performs its own authentication and the upstream
+# listens on loopback/private networks.
+# [[static_routes]]
+# mount = "/newapi"
+# upstream = "http://127.0.0.1:3000"
+# strip_prefix = true
+# require_auth = false
+# headers = { "X-DivertLink-Route" = "newapi" }

@@ -1,0 +1,32 @@
+# Rust 构建产物
+/target/
+**/*.rs.bk
+
+# 仓库内本地 Rust 工具链（scripts/env.sh 使用，不入库）
+/.toolchain/
+
+# 证书与私钥：绝不入库（TLS 密钥、CA、SPKI pin 相关材料）
+/certs/
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# 部署时由运维放置的配置与证书（deploy/docker-compose.yml 使用）
+/deploy/config/
+/deploy/certs/
+
+# 本地二进制
+/divertlink
+/divertlink.exe
+
+# 日志、临时与编辑器文件
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

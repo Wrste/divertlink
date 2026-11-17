@@ -1,0 +1,19 @@
+# 构建上下文白名单：只发送编译必需的文件，避免证书/密钥/本地工具链进入镜像层。
+# 规则按顺序匹配，后匹配者生效。
+# 注意：
+#   - assets/ 必须保留：src/config.rs 用 include_str!("../assets/*.example.toml")
+#     把示例配置编进二进制，缺失会编译失败。
+#   - LICENSE-* 必须保留：会复制进运行镜像的 /licenses/。
+#   - rust-toolchain.toml 有意不复制：构建器用 rust:${RUST_VERSION}-alpine 固定版本，
+#     若复制进去会让 rustup 在镜像里再下载一个 stable 工具链。
+**
+!Dockerfile
+!.dockerignore
+!Cargo.toml
+!Cargo.lock
+!src
+!src/**
+!assets
+!assets/**
+!LICENSE-MIT
+!LICENSE-APACHE

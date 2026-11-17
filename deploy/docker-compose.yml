@@ -1,0 +1,109 @@
+# DivertLink gateway 的 Docker Compose 示例。
+#
+# 目录约定（均在仓库 deploy/ 下，首次使用需创建）：
+#   deploy/config/server.toml   网关配置（建议由 deploy/install.sh 生成后复制过来）
+#   deploy/certs/server.crt     服务器证书链
+#   deploy/certs/server.key     服务器私钥
+# 文件权限需让容器内 nonroot（uid/gid 65532）可读：
+#   sudo chown -R 65532:65532 deploy/config deploy/certs
+#   chmod 640 deploy/config/server.toml deploy/certs/server.key
+#
+# 端口：
+#   443   agent 隧道 + 公网 TLS 入口（tunnel_listen 与 ingress_listen 共用，按 ALPN 分流）
+#   8080  http_listen，仅供本机 nginx/caddy 终止 TLS 后回源，不映射到公网
+#   9090  admin_listen，仅绑定本机回环
+#
+# 以非 root 监听 443：容器内核允许非特权端口（sysctl）或授予 NET_BIND_SERVICE，
+# 两者已同时给出；若宿主机不支持该 sysctl（内核 < 5.7），可只保留 cap_add。
+#
+# 真实客户端 IP：默认 bridge 网络下，网关看到的客户端 IP 是 Docker 网关地址，
+# allow_ips/按 IP 限流会失真。需要精确客户端 IP 时改用 host 网络（见文末注释）；
+# 若在同机前置 nginx/Caddy，则把 server.toml 的 [server].trust_proxy 设为 true。
+#
+# 启动：docker compose -f deploy/docker-compose.yml up -d
+# 日志：docker compose -f deploy/docker-compose.yml logs -f gateway
+
+name: divertlink
+
+services:
+  gateway:
+    image: ghcr.io/divertlink/divertlink:${DIVERTLINK_VERSION:-latest}
+    restart: unless-stopped
+    command: ["server", "-c", "/etc/divertlink/server.toml"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_add:
+      - NET_BIND_SERVICE
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    ports:
+      # 网关单端口 ALPN 复用：agent（divertlink/1）与 HTTP 客户端（h2/http/1.1）都走 443
+      - "443:443/tcp"
+      # 可选明文入口：只给本机 nginx/caddy 用，不暴露公网
+      - "127.0.0.1:8080:8080/tcp"
+      # 管理端点：只给本机运维/监控用，绝不暴露公网
+      - "127.0.0.1:9090:9090/tcp"
+    volumes:
+      # server.toml 里的 tls.cert/key 可用相对路径（按配置文件目录解析，即
+      # /etc/divertlink/certs/server.crt），也可直接写容器内绝对路径：
+      #   /etc/divertlink/certs/server.crt、/etc/divertlink/certs/server.key
+      - ./config:/etc/divertlink:ro
+      - ./certs:/etc/divertlink/certs:ro
+    healthcheck:
+      # 镜像内自带静态 busybox（distroless 无 wget/curl）
+      test: ["CMD", "/bin/busybox", "wget", "-q", "-O", "-", "http://127.0.0.1:9090/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ------------------------------------------------------------------------------
+# new-api 上游接法（三选一，详见 docs/deployment.md）
+#
+# ① new-api 作为客户端：把本网关当作 OpenAI / Anthropic 渠道
+#    渠道 Base URL 填 https://llm.example.com/home（对应 [[tunnels]].mount = "/home"），
+#    或给隧道配置 hosts（如 home.llm.example.com）后填 https://home.llm.example.com；
+#    渠道密钥使用 server.toml 中 [[api_keys]].key（支持 Authorization: Bearer 与 x-api-key）。
+#
+# ② 网关 static_routes 反代到 new-api（new-api 与 gateway 在同一 Docker 网络）：
+#    server.toml 追加：
+#      [[static_routes]]
+#      mount = "/newapi"
+#      upstream = "http://new-api:3000"
+#      strip_prefix = true
+#      require_auth = true   # 默认校验网关 API Key；new-api 自行鉴权且仅内网可达时可设 false
+#    取消下面 new-api 服务的注释后，客户端访问 https://llm.example.com/newapi/v1/...
+#    （new-api 数据持久化与数据库/Redis 凭据请按其官方文档配置，这里只给出最小骨架。）
+#
+# ③ agent 的 [target].url 指向家庭侧 new-api（如 http://127.0.0.1:3000），
+#    agent 用 systemd 部署在家庭机；本 compose 只跑 gateway。
+#
+#  new-api:
+#    image: calciumion/new-api:latest
+#    restart: unless-stopped
+#    expose:
+#      - "3000"
+#    volumes:
+#      - new-api-data:/data
+#
+# ------------------------------------------------------------------------------
+# 如需保留真实客户端 IP（allow_ips、按 IP 限流、审计日志准确），改用 host 网络：
+#   gateway:
+#     network_mode: host
+#     # 删除 ports；直接监听宿主机 443/127.0.0.1:8080/127.0.0.1:9090
+#     # 此时 sysctls 不生效，需二选一：
+#     #   sudo sysctl -w net.ipv4.ip_unprivileged_port_start=0   （持久化写入 /etc/sysctl.d/）
+#     #   或保留 cap_add: NET_BIND_SERVICE
+#
+# 若 ② 的 new-api 启用，再取消下面 volumes 注释：
+# volumes:
+#   new-api-data:

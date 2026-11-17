@@ -1,0 +1,92 @@
+# DivertLink 家庭端 agent 示例配置
+#
+# 目录布局（演示时把本文件复制到与 certs/ 同级的目录）：
+#   ./agent.toml           <- 本文件
+#   ./certs/ca.crt         <- 从网关侧 gen-certs 生成的 CA 证书
+#
+#   divertlink check -c agent.toml
+#   divertlink agent -c agent.toml
+#
+# 注意：
+#   - 证书/CA 的相对路径以【配置文件所在目录】为基准解析，不是进程工作目录。
+#   - id / token 必须与网关 server.toml 中对应 [[tunnels]] 完全一致。
+#   - server 中 gateway.example.com 为占位域名，使用时替换为你的网关域名或公网 IP。
+
+[agent]
+# 隧道 id，对应网关 [[tunnels]].id
+id = "home"
+
+# 网关地址：host:port，也可写成 https://gateway.example.com:443 或 tls://...
+# 只接受 TLS；http:// 与 ws:// 会被拒绝。
+server = "gateway.example.com:443"
+
+# 隧道认证令牌，对应网关 [[tunnels]].token（示例值与 server.toml 一致）
+token = "agt_change_me"
+
+# 应用层心跳间隔（控制流 ping/pong）
+heartbeat = "5s"
+
+# 心跳超时：必须严格大于 heartbeat；连续该时长没有收到任何控制流消息或流数据，
+# 即判定会话失联并重连
+heartbeat_timeout = "15s"
+
+# 心跳模式：app（默认，控制流 ping/pong）| transport（TCP keepalive）| both | none
+heartbeat_mode = "app"
+
+# 建立 TLS/TCP 连接的超时
+connect_timeout = "10s"
+
+# 本机同时处理的上游请求上限（并发窗口），必须 > 0
+max_inflight = 128
+
+# 断线重连退避：最小/最大间隔，jitter 为 0.0-1.0 的随机抖动比例
+reconnect_min = "1s"
+reconnect_max = "60s"
+reconnect_jitter = 0.3
+
+# 上报给网关的协议能力（写入控制流 hello）
+protocols = ["openai", "anthropic", "vllm"]
+
+[tls]
+# 校验网关证书用的 CA 文件。自签部署时填 gen-certs 生成的 ca.crt；
+# 网关使用公网 CA 证书时删除本行（使用系统根证书）。
+ca = "certs/ca.crt"
+
+# 可选 SPKI SHA-256 pin（base64 或 hex），gen-certs 会打印该值。
+# 启用后即使 CA 被错误签发也无法中间人；证书轮换时需同步更新。不启用则删除本行。
+# pin = ""
+
+# TLS SNI；留空/不配置 = 自动取 server 的 host 部分。不启用则删除本行。
+# servername = "gateway.example.com"
+
+# mTLS 客户端证书：仅当网关开启 [tls].client_ca 时需要（两者必须同时配置）。
+# 用 `divertlink gen-certs --client` 或 `divertlink init --mtls` 生成；
+# 注意 init --mtls + 绝对 --dir 时写入的是绝对路径，拷到家庭端后需按实际目录调整。
+# client_cert = "certs/client.crt"
+# client_key  = "certs/client.key"
+
+# 仅调试用：跳过证书校验。生产环境严禁开启。
+insecure = false
+
+[target]
+# 家庭端实际服务地址：vLLM / Ollama / LM Studio / llama.cpp / new-api 均可。
+# 请求被网关透明转发到这里，路径与 body 不做解析。
+url = "http://127.0.0.1:8000"
+
+# 单个上游请求等待响应头的超时（长文本生成可适当调大）
+request_timeout = "10m"
+
+# 连接上游服务的超时
+connect_timeout = "5s"
+
+# target 为 https 时用于校验其证书的额外 CA（自签上游时填写）；不需要则删除本行。
+# tls_ca = "certs/target-ca.crt"
+
+# 附加到每个上游请求的静态头，例如 [headers]
+# 注意：这里适合放 trace id 一类的头，不要放认证令牌；
+#       认证由网关侧的 upstream_api_key / upstream_auth_header 管理。
+headers = {}
+
+[log]
+level = "info"   # trace | debug | info | warn | error
+format = "text"  # text | json

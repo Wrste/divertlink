@@ -1,0 +1,120 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一 ref 的新提交取消旧任务
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (-D warnings)
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+  test:
+    name: cargo test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      # e2e 测试会真实绑定 127.0.0.1 的临时端口，Windows/macOS 上同样可用；
+      # 保持 cargo test 默认并行度即可（偶发 flaky 时再考虑 --test-threads=1）。
+      - name: Run tests
+        run: cargo test --locked
+
+  doc:
+    name: cargo doc
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Build docs (warnings as errors)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps --all-features
+
+  # 端到端冒烟：真实启动 mock 上游 + gateway + agent，用 curl 验证接口、SSE、认证与管理端点。
+  smoke:
+    name: smoke (e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Build debug binary
+        run: cargo build --locked
+      - name: Run smoke test
+        run: ./scripts/smoke.sh -b ./target/debug/divertlink
+
+  # 部署资产自身的一致性检查：YAML 可解析、install.sh 语法正确、
+  # systemd/nginx/Caddy/Dockerfile 关键契约齐全、compose 文件合法。
+  deploy-assets:
+    name: deploy assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PyYAML
+        run: python3 -m pip install --user pyyaml
+      - name: Validate deploy assets
+        run: bash deploy/check-assets.sh
+
+  # 声明的 MSRV 是 1.88；这里只做信息性验证：若依赖 MSRV 已高于 1.88，
+  # 该 job 会失败但不阻塞合并（需要时再调整 Cargo.toml/Cargo.lock）。
+  msrv:
+    name: MSRV (1.88, informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.88.0 --profile minimal
+      - name: Check with MSRV
+        run: cargo +1.88.0 check --locked --all-targets
+
+  shellcheck:
+    name: shellcheck (deploy/scripts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        run: |
+          shellcheck --version
+          shellcheck -x deploy/install.sh deploy/check-assets.sh scripts/smoke.sh

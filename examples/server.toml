@@ -1,0 +1,165 @@
+# DivertLink 网关（公网固定 IP 服务器）示例配置
+#
+# 目录布局（演示时把本文件复制到与 certs/ 同级的目录）：
+#   ./server.toml          <- 本文件
+#   ./agent.toml
+#   ./certs/server.crt
+#   ./certs/server.key
+#   ./certs/ca.crt
+#
+#   divertlink gen-certs --dir certs --domain gateway.example.com
+#   divertlink check -c server.toml
+#   divertlink server -c server.toml
+#
+# 注意：
+#   - 证书/CA 的相对路径以【配置文件所在目录】为基准解析，不是进程工作目录。
+#   - 令牌、API Key 均为示例值，上线前必须替换为随机值。
+#   - 生产环境请参考 docs/security.md 与 docs/deployment.md 收紧权限。
+
+[server]
+# 实例名，用于日志与 /status 展示
+name = "divertlink-gateway"
+
+# agent 隧道监听（TLS，ALPN "divertlink/1"）
+tunnel_listen = "0.0.0.0:443"
+
+# 公网 HTTP(S) 入口（OpenAI/Anthropic/vLLM 客户端、new-api 渠道）
+# 与 tunnel_listen 相同时共用 443 端口，按 TLS ALPN 分流，防火墙只需放行 443。
+ingress_listen = "0.0.0.0:443"
+
+# 可选：明文入口，仅供本机 nginx / 本机 new-api 使用，禁止暴露到公网。
+# 注意：监听字段无法用 TOML 关闭——删除本行会回落到默认的 127.0.0.1:8080，
+# 写空字符串 "" 会解析失败；端口冲突时请改成其他回环端口（如 127.0.0.1:18080）。
+http_listen = "127.0.0.1:8080"
+
+# 管理端点：/healthz /readyz /metrics /status，只监听本机回环地址。
+# 同样无法通过删除/置空关闭，只能改成其他回环端口。
+admin_listen = "127.0.0.1:9090"
+
+# 是否采信反向代理传来的 X-Forwarded-For/X-Real-IP 作为客户端 IP。
+# 仅当本机/内网有可信反向代理（nginx/Caddy）时设为 true；
+# 公网直连场景保持 false，否则 allow_ips 可被伪造头绕过。
+trust_proxy = false
+
+[tls]
+# 服务端证书与私钥。自签证书可用 divertlink gen-certs 生成；
+# 正式环境建议使用 Let's Encrypt 等 CA 签发的证书（SAN 需覆盖所有访问域名）。
+cert = "certs/server.crt"
+key = "certs/server.key"
+
+# 可选 mTLS：填写客户端 CA 文件后，TLS 握手会要求 agent 出示客户端证书。
+# 启用时：
+#   1) tunnel_listen 与 ingress_listen 必须拆分为不同端口（公网入口不会出示客户端证书）；
+#   2) agent.toml 的 [tls] 还需同时配置 client_cert / client_key（用 --mtls 生成）；
+#   3) init --mtls 只生成证书，本行仍需手动取消注释、端口仍需手动拆分。
+# client_ca = "certs/ca.crt"
+
+# 最低 TLS 版本："1.3"（默认，推荐）或 "1.2"（兼容老客户端）
+min_version = "1.3"
+
+[limits]
+# 单个请求体上限；超出返回 413
+max_request_bytes = "64MiB"
+
+# 网关侧单请求超时（等待响应头/上游处理）；超时返回 504
+request_timeout = "10m"
+
+# 流式响应空闲超时：超过该时长没有任何响应数据则中断
+stream_idle_timeout = "120s"
+
+# 读取客户端请求头的超时，防慢速头攻击
+header_read_timeout = "10s"
+
+# 每条隧道默认并发流上限（可被 [[tunnels]].max_streams 覆盖）
+max_streams_per_tunnel = 256
+
+# 允许的最大并发隧道连接数
+max_connections = 1024
+
+[log]
+# trace | debug | info | warn | error，也可写 "divertlink=debug,tower=warn"
+level = "info"
+
+# text（人读）| json（采集到 Loki/ELK 等）
+format = "text"
+
+# ---------------------------------------------------------------------------
+# 公网入口 API Key：客户端（含 new-api 渠道）访问网关时使用。
+# 客户端可携带 Authorization: Bearer <key> 或 x-api-key: <key>。
+# 可用 `divertlink token --prefix dlk_` 生成随机 Key。
+# 注意：配置了 [[tunnels]] 时至少需要一个 [[api_keys]]，入口不允许匿名。
+# ---------------------------------------------------------------------------
+[[api_keys]]
+name = "newapi"                          # 名称必须唯一，用于日志与 /status 展示
+key = "dlk_change_me"                    # 上线前替换为随机 Key
+allow_tunnels = ["home", "newapi-local"] # 允许访问的隧道 id；空数组 = 允许全部
+allow_ips = []                           # 允许的客户端 CIDR，如 ["203.0.113.0/24"]；空 = 不限制
+rate_limit = "600/min"                   # 令牌桶限流，如 "600/min"、"30/s"；不配置 = 不限
+max_concurrent = 64                       # 该 Key 并发请求上限；0 = 不限
+
+# 可选：给内部运维单独一个 Key，限制更严格
+[[api_keys]]
+name = "ops"
+key = "dlk_ops_change_me"
+allow_tunnels = ["home"]
+allow_ips = ["203.0.113.10/32"]
+rate_limit = "60/min"
+max_concurrent = 8
+
+# ---------------------------------------------------------------------------
+# 隧道：与家庭端 agent.toml 的 id / token 一一对应。
+# 路由：请求命中 hosts -> 原路径转发；命中 mount 前缀 -> 剥离后转发；
+#       都不命中 -> 走 default = true 的隧道（全配置最多一个，且不能同时设 mount）。
+# 每条隧道至少要配置 mount、hosts、default 三者之一，否则校验报 unreachable。
+# ---------------------------------------------------------------------------
+[[tunnels]]
+id = "home"                              # 必须与 agent.toml 的 [agent].id 完全一致
+token = "agt_change_me"                  # agent 认证令牌，必须与 agent.toml 的 token 一致
+mount = "/home"                          # 公网路径前缀：https://gateway.example.com/home/v1/...
+hosts = []                               # 可选 Host 路由，如 ["home.llm.example.com"]；非空时该隧道只接受这些 Host
+default = false                          # 是否作为无匹配请求的兜底隧道（全配置只能一个 true）
+protocols = ["openai", "anthropic", "vllm"] # 声明的协议能力（空 = 全部；可用 custom）
+upstream_api_key = ""                    # 空 = 原样透传客户端认证头
+upstream_auth_header = "passthrough"     # passthrough | authorization | x-api-key | none
+public_paths = ["/health"]               # 相对 mount 的免认证路径前缀（公网 /home/health）
+max_streams = 128                        # 该隧道并发流上限；不设则继承 limits.max_streams_per_tunnel
+request_timeout = "10m"                  # 该隧道单请求超时；不设则继承 limits.request_timeout
+enabled = true
+
+# 可选：第二条隧道用于家庭端 new-api（由 agent 转发，而非 static_routes 直连）
+[[tunnels]]
+id = "newapi-local"
+token = "agt_newapi_change_me"
+mount = "/llm-api"
+hosts = []
+default = false
+protocols = ["openai", "anthropic"]
+upstream_api_key = "sk-home-newapi-token"   # 用固定 Key 替换客户端认证头，避免暴露 new-api 令牌
+upstream_auth_header = "authorization"      # 家庭端 new-api 期望 Authorization: Bearer <该 Key>
+public_paths = ["/health"]
+max_streams = 64
+request_timeout = "10m"
+enabled = true
+
+# ---------------------------------------------------------------------------
+# 静态路由：网关直接把 /newapi 前缀反向代理到本机 new-api（不经过隧道）。
+# 客户端访问：https://gateway.example.com/newapi/v1/chat/completions
+# 转发到：    http://127.0.0.1:3000/v1/chat/completions
+#
+# 鉴权边界（重要）：
+#   - 默认 require_auth = true：静态路由与隧道一样要求网关 API Key，并执行 Key 的
+#     allow_ips / rate_limit / max_concurrent 检查；
+#   - require_auth = false：网关只透传请求头，由 new-api 自行鉴权。此时 upstream 只应
+#     写 127.0.0.1 / 内网地址，避免网关变成无需认证的开放代理。
+# 客户端可以同时携带网关 Key（Authorization: Bearer dlk_...）与 new-api 令牌。
+# ---------------------------------------------------------------------------
+[[static_routes]]
+mount = "/newapi"
+upstream = "http://127.0.0.1:3000"
+strip_prefix = true
+# 本示例交给 new-api 自行校验令牌；若希望网关也校验 API Key，删除或改为 true。
+require_auth = false
+# 上游为 HTTPS 且使用私有 CA 时：
+# tls_ca = "certs/upstream-ca.crt"
+# 附加到上游请求的静态头：
+# headers = { "X-DivertLink-Route" = "newapi" }

@@ -1,0 +1,6 @@
+[toolchain]
+# 使用 stable 通道：Cargo.toml 声明 rust-version = "1.88"，stable 需 >= 1.88。
+# 需要固定版本时可在 CI/本地用 `rustup override set 1.88.0`，或把 channel 改为 "1.88.0"。
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

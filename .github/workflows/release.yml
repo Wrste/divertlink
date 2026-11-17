@@ -1,0 +1,199 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_VERSION: ${{ github.ref_name }}
+
+jobs:
+  # 多平台 release 二进制；资产命名与 deploy/install.sh 的下载逻辑保持一致：
+  #   divertlink-<version>-<target>.tar.gz(.sha256) / .zip(.sha256)
+  #
+  # Linux musl 用 `cross` 构建（cross 自带对应的 musl 交叉工具链，静态链接；
+  # 若后续改为 zigbuild，只需替换本 job 的构建命令）。
+  # macOS：aarch64 用 macos-14（Apple Silicon 原生），x86_64 用 macos-13（Intel 原生）。
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            tool: cross
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            tool: cross
+          - target: aarch64-apple-darwin
+            os: macos-14
+            tool: cargo
+          - target: x86_64-apple-darwin
+            os: macos-13
+            tool: cargo
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            tool: cargo
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust target
+        if: matrix.tool == 'cargo'
+        shell: bash
+        run: rustup target add "${{ matrix.target }}"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.tool == 'cross'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build release binary
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.tool }}" == "cross" ]]; then
+            cross build --release --locked --target "$TARGET"
+          else
+            cargo build --release --locked --target "$TARGET"
+          fi
+
+      # 打包时把待压缩目录放在 staging/，dist/ 只放要上传的归档与校验文件，
+      # 避免 upload-artifact 把解压后的目录也当成 release 资产。
+      - name: Package (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_VERSION#v}"
+          name="divertlink-${version}-${TARGET}"
+          mkdir -p "staging/${name}"
+          cp "target/${TARGET}/release/divertlink" "staging/${name}/"
+          cp LICENSE-MIT LICENSE-APACHE "staging/${name}/"
+          if [[ -f README.md ]]; then
+            cp README.md "staging/${name}/"
+          fi
+          mkdir -p dist
+          tar -C staging -czf "dist/${name}.tar.gz" "${name}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "${name}.tar.gz" >"${name}.tar.gz.sha256")
+          else
+            (cd dist && shasum -a 256 "${name}.tar.gz" >"${name}.tar.gz.sha256")
+          fi
+          ls -l dist
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:RELEASE_VERSION -replace '^v', ''
+          $name = "divertlink-$version-$env:TARGET"
+          New-Item -ItemType Directory -Force -Path "staging/$name" | Out-Null
+          Copy-Item "target/$env:TARGET/release/divertlink.exe" "staging/$name/"
+          Copy-Item LICENSE-MIT, LICENSE-APACHE "staging/$name/"
+          if (Test-Path README.md) { Copy-Item README.md "staging/$name/" }
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+          Compress-Archive -Path "staging/$name" -DestinationPath "dist/$name.zip"
+          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "dist/$name.zip.sha256"
+          Get-ChildItem dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # 汇总所有产物，创建/更新 GitHub Release
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -l dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # 可选：在仓库 Settings -> Variables 设置 ENABLE_GHCR=true 后，
+  # 推送多架构镜像到 ghcr.io/<owner>/divertlink（semver tag + latest）。
+  docker:
+    name: docker image (ghcr, optional)
+    needs: publish
+    if: ${{ vars.ENABLE_GHCR == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/divertlink
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 跨架构 rust 编译经 QEMU 模拟，缓存能显著缩短重复构建时间
+          cache-from: type=gha,scope=divertlink-image
+          cache-to: type=gha,mode=max,scope=divertlink-image

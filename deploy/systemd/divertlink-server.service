@@ -1,0 +1,65 @@
+[Unit]
+Description=DivertLink gateway (public LLM reverse tunnel server)
+Documentation=https://github.com/divertlink/divertlink/blob/main/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+# 连续快速失败时停止重试，避免证书缺失/配置错误导致无限重启噪音
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=divertlink
+Group=divertlink
+# 配置中的相对证书路径（certs/server.crt）以 /etc/divertlink 为基准
+WorkingDirectory=/etc/divertlink
+ExecStart=/usr/local/bin/divertlink server -c /etc/divertlink/server.toml
+# 优雅退出：SIGTERM 由程序处理（关闭监听、断开隧道、等待在途请求）
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+
+# 可选环境变量（DIVERTLINK_CONFIG 等，见 docs/DESIGN.md §5.2）；文件不存在时忽略
+EnvironmentFile=-/etc/divertlink/server.env
+
+# 以非 root 监听 443：只保留 CAP_NET_BIND_SERVICE 这一个 capability
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+
+# 文件系统/内核攻击面收敛：系统目录只读，仅放行状态与证书目录可写
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RemoveIPC=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# 仅运行时状态目录可写；配置与证书全程只读（证书轮换由 root 更新文件后重启服务）。
+# 不要在这里放 /etc/divertlink/certs：该目录属主是 root:divertlink、权限 0750，
+# 服务用户本来也无写权限，加入 ReadWritePaths 只会扩大暴露面。
+ReadWritePaths=/var/lib/divertlink
+StateDirectory=divertlink
+StateDirectoryMode=0750
+UMask=0027
+
+# 单进程承载大量并发连接/流，放宽 fd 上限（默认 1024 在多隧道时偏小）
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
