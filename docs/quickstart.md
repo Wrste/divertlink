@@ -149,12 +149,19 @@ divertlink version
 
 将 `export PATH="$HOME/.local/bin:$PATH"` 添加到 `~/.zshrc`（macOS Bash 登录终端用 `~/.bash_profile`），
 重新打开终端验证。也可用 `~/.local/bin/divertlink` 的绝对路径启动。
-如果系统提示无法验证开发者，先确认文件来自上述仓库且 SHA256 校验通过，再按
+正式 macOS 发布包由 Developer ID 签名并经过 Apple 公证。优先下载同架构的 `.dmg`，
+校验对应 `.sha256` 后双击挂载，在终端运行卷内的 `divertlink`，或双击
+`DivertLink Console.command` 打开控制台；需要长期使用时，将二进制复制到上述安装目录。
+DMG 已附加公证票据，适合离线验证；tar.gz 中为同一签名二进制，首次评估可能需要联网。
+
+若使用自行构建的未签名包且系统提示无法验证开发者，先确认来源，再按
 「系统设置 → 隐私与安全性」中的提示处理；不要全局关闭 Gatekeeper。
 
 安装完成后运行 `divertlink console --open` 即可打开图形控制台。它是浏览器界面，
 不是 `.app` 安装包；使用 PWA 与双击启动器的方法见 [图形化客户端](console.md)
 和 [桌面启动器](../scripts/desktop/README.md)。
+
+维护者需要构建可直接运行的 Linux/macOS 发布包时，参见[构建、签名与公证](releasing.md)。
 
 ### 2.4 Windows 安装发行包
 

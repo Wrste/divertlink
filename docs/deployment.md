@@ -60,6 +60,7 @@ agent **主动出站**连接 gateway，因此家庭侧不需要公网 IP、端�
 
 Windows、macOS 与 Linux 的下载、校验、PATH 和源码构建步骤见
 [多平台安装指南](quickstart.md#2-安装-divertlink)。本篇 systemd 示例适用于 Linux。
+维护者构建、签名和公证发行包见[发布指南](releasing.md)。
 
 ---
 

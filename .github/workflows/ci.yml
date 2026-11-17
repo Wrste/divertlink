@@ -117,4 +117,4 @@ jobs:
       - name: Run shellcheck
         run: |
           shellcheck --version
-          shellcheck -x deploy/install.sh deploy/check-assets.sh scripts/smoke.sh
+          shellcheck -x deploy/install.sh deploy/check-assets.sh scripts/smoke.sh scripts/release-unix.sh

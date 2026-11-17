@@ -37,7 +37,7 @@ require_in_file() {
 
 
 echo "== shell 语法"
-for script in deploy/install.sh deploy/check-assets.sh; do
+for script in deploy/install.sh deploy/check-assets.sh scripts/release-unix.sh; do
     if bash -n "$script"; then ok "bash -n $script"; else bad "bash -n $script"; fi
 done
 if [[ -x deploy/install.sh ]]; then ok "deploy/install.sh 可执行"; else bad "deploy/install.sh 缺少可执行位"; fi

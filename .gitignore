@@ -1,5 +1,6 @@
 # Rust 构建产物
 /target/
+/dist/
 **/*.rs.bk
 
 # 仓库内本地 Rust 工具链（scripts/env.sh 使用，不入库）

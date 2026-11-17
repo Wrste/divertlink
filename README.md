@@ -16,6 +16,7 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 - [特性](#特性)
 - [架构](#架构)
 - [安装 DivertLink](#安装-divertlink)
+- [构建、签名与公证](docs/releasing.md)
 - [30 秒快速开始](#30-秒快速开始)
 - [图形化客户端](#图形化客户端内置控制台)
 - [命令行速查](#命令行速查)
@@ -97,6 +98,9 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 安装后运行 `divertlink version`、`divertlink --help` 验证；桌面用户可运行
 `divertlink console --open` 打开图形界面，再继续下方配置步骤。
 常见安装问题见[快速开始第 2.7 节](docs/quickstart.md#27-安装验证与常见问题)。
+
+维护者可在 Linux/macOS 上直接构建发布包；macOS 还支持本机 Developer ID 签名、DMG
+公证与 stapling。详见[构建、签名与公证](docs/releasing.md)。
 
 ## 30 秒快速开始
 
