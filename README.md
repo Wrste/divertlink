@@ -2,18 +2,16 @@
 
 **中文** · [English](README.en.md) · [文档目录](docs/README.md) · [Releases](https://github.com/Wrste/divertlink/releases)
 
-> **中文**：把运行在家庭宽带上的大模型服务，安全地映射到有固定公网 IP 的服务器上——
-> 家庭端主动建立加密反向隧道，公网侧提供 OpenAI / Anthropic / vLLM 完全兼容的 HTTP(S) 入口。
+> **安全的 Rust 反向隧道，把家庭内网的大模型服务接入公网。**
 >
-> **English**: DivertLink is a secure, high-performance reverse tunnel that exposes
-> home-hosted LLM services (OpenAI / Anthropic / vLLM compatible) behind a fixed public IP.
+> 家庭端主动建立 TLS 加密连接，云端网关提供固定公网入口；无需公网 IP、端口映射或入站防火墙规则。
+>
+> **Secure Rust reverse tunnel for home-hosted LLMs.** The home agent connects outbound to a public gateway, exposing OpenAI / Anthropic / vLLM-compatible APIs without a public IP or inbound port forwarding.
 
-DivertLink 面向“模型跑在家里、入口放在云上”的场景：你在家庭宽带的 GPU 机器上跑
-vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想做端口映射。
-在云服务器上运行 `divertlink server`，在家庭机器上运行 `divertlink agent`，agent 主动
-连向 server 建立一条 TLS 加密长连接；公网用户通过 server 的 443 端口访问模型服务，
-协议原样透传、SSE 逐块流式。网关也可以直接作为 new-api / one-api 的上游渠道，
-或反向代理到 new-api。
+DivertLink 适合将运行在家庭 GPU、办公室内网或私有服务器上的 vLLM、Ollama、LM Studio、
+llama.cpp 和 new-api 接入统一公网地址。网关负责 TLS、认证、限流和路由，agent 负责出站连接
+与本地转发；请求保持 HTTP 语义透明，SSE 流式响应逐块到达。它也可以作为 new-api / one-api
+的上游渠道，或反向代理到内网服务。
 
 - [特性](#特性)
 - [架构](#架构)
@@ -99,7 +97,7 @@ vLLM / Ollama / LM Studio / llama.cpp / new-api，但没有公网 IP、也不想
 下载入口：[GitHub Releases](https://github.com/Wrste/divertlink/releases)。
 [v0.1.1](https://github.com/Wrste/divertlink/releases/tag/v0.1.1) 已提供 Linux x86_64/ARM64
 和经过签名、公证的 macOS Intel/Apple Silicon 安装包，下载后即可运行。
-Windows 预构建包尚未发布，可先按源码安装步骤构建。
+v0.1.1 已提供 Windows x86_64 预构建包；32 位和 Windows ARM64 暂无预构建包。
 安装后运行 `divertlink version`、`divertlink --help` 验证；桌面用户可运行
 `divertlink console --open` 打开图形界面，再继续下方配置步骤。
 常见安装问题见[快速开始第 2.7 节](docs/quickstart.md#27-安装验证与常见问题)。

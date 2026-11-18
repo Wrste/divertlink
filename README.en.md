@@ -2,7 +2,9 @@
 
 [中文](README.md) · **English** · [Documentation](docs/en/README.md) · [Releases](https://github.com/Wrste/divertlink/releases)
 
-Expose LLM services running on a home network through a gateway with a public IP. The home agent opens an outbound encrypted tunnel; API clients connect to the gateway over HTTPS. No public IP or inbound port forwarding is needed at home.
+**A secure Rust reverse tunnel for home-hosted LLMs.** DivertLink connects a private model server to a public gateway over an outbound TLS tunnel, so clients get a stable HTTPS endpoint without a home public IP or inbound port forwarding.
+
+Use it for vLLM, Ollama, LM Studio, llama.cpp, new-api and similar services running on a home GPU, office network or private host. The gateway handles TLS termination, API-key authentication, rate limits and routing; the agent forwards HTTP traffic to the local model. Streaming SSE passes through incrementally, and the protocol remains compatible with OpenAI, Anthropic and vLLM clients.
 
 ```text
 API client → HTTPS gateway :443 → TLS + yamux tunnel → home agent → local model
@@ -20,7 +22,7 @@ DivertLink forwards HTTP semantics and streaming bodies without interpreting mod
 | Linux ARM64 | `aarch64-unknown-linux-musl.tar.gz` | Statically linked |
 | macOS Apple Silicon | `aarch64-apple-darwin.dmg` or `.tar.gz` | Developer ID signed and Apple notarized |
 | macOS Intel | `x86_64-apple-darwin.dmg` or `.tar.gz` | Developer ID signed and Apple notarized |
-| Windows x64 | Source build for now | MSVC Build Tools and Rust stable required to build |
+| Windows x64 | `x86_64-pc-windows-msvc.zip` | Prebuilt; checksum included |
 
 Download the matching asset and its `.sha256` file. Archives contain a directory named after the asset, with the executable inside. See [platform installation](docs/en/installation.md) for download commands, checksum verification, PATH setup and source builds. macOS DMGs have stapled tickets for offline verification.
 
