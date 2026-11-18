@@ -11,9 +11,9 @@ Use a complete repository checkout: `deploy/install.sh` loads templates from `de
 ```bash
 git clone https://github.com/Wrste/divertlink.git
 cd divertlink
-sudo ./deploy/install.sh --server --version 0.1.0 \
+sudo ./deploy/install.sh --server --version 0.1.1 \
   --domain gateway.example.com --no-start --dry-run
-sudo ./deploy/install.sh --server --version 0.1.0 \
+sudo ./deploy/install.sh --server --version 0.1.1 \
   --domain gateway.example.com --no-start
 ```
 
@@ -31,7 +31,7 @@ sudo journalctl -u divertlink-server -n 50 --no-pager
 On the home machine, use the same full checkout:
 
 ```bash
-sudo ./deploy/install.sh --agent --version 0.1.0 \
+sudo ./deploy/install.sh --agent --version 0.1.1 \
   --gateway gateway.example.com:443 --no-start
 # Privately edit agent.toml: match gateway ID/token, choose target.url and TLS trust.
 sudo /usr/local/bin/divertlink check -c /etc/divertlink/agent.toml
@@ -57,7 +57,7 @@ Use an unprivileged TLS port such as 8443 for desktop trials; change both gatewa
 
 ## Docker Compose
 
-The initial v0.1.0 release has **no published GHCR image**. Build locally from the repository instead of assuming the Compose image can be pulled:
+The initial v0.1.1 release has **no published GHCR image**. Build locally from the repository instead of assuming the Compose image can be pulled:
 
 ```bash
 make docker TAG=latest

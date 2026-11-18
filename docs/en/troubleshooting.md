@@ -6,7 +6,7 @@ Check the actual failing hop: API client → gateway, gateway → agent, then ag
 
 | Symptom | Next check |
 | --- | --- |
-| Download 404 | Confirm version, CPU and available assets on Releases; v0.1.0 has no Windows ZIP or GHCR image |
+| Download 404 | Confirm version, CPU and available assets on Releases; Windows ZIP/GHCR availability depends on the published Release assets |
 | Permission denied on 443 | Use the Linux systemd capability or an unprivileged port on both listeners and agent/client URLs |
 | Agent cannot connect | DNS, outbound firewall, gateway listen port and cloud security group |
 | TLS unknown issuer / name mismatch | Correct CA, full certificate chain, SNI/SAN, validity and system clock; never bypass verification |

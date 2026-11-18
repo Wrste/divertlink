@@ -68,12 +68,12 @@ Windows、macOS 与 Linux 的下载、校验、PATH 和源码构建步骤见
 
 ## 2. 快速开始（单端口 443 共用）
 
-以下假设网关域名 `llm.example.com`、版本 `0.1.0`、agent 隧道 id `home`、mount `/home`。
+以下假设网关域名 `llm.example.com`、版本 `0.1.1`、agent 隧道 id `home`、mount `/home`。
 单端口 ALPN 共用模式不需要 nginx/Caddy。
 
-[v0.1.0](https://github.com/Wrste/divertlink/releases/tag/v0.1.0) 已提供 Linux/macOS
-发行包，可直接执行下面的 `--version 0.1.0` 在线安装示例。也可按
-[源码安装](quickstart.md#25-从源码安装所有平台)构建，再将 `--version 0.1.0`
+[v0.1.1](https://github.com/Wrste/divertlink/releases/tag/v0.1.1) 已提供 Linux/macOS
+发行包，可直接执行下面的 `--version 0.1.1` 在线安装示例。也可按
+[源码安装](quickstart.md#25-从源码安装所有平台)构建，再将 `--version 0.1.1`
 替换为 `--binary ./target/release/divertlink` 离线安装。
 
 ### 2.1 在公网服务器安装 gateway
@@ -81,7 +81,7 @@ Windows、macOS 与 Linux 的下载、校验、PATH 和源码构建步骤见
 ```bash
 git clone https://github.com/Wrste/divertlink.git
 cd divertlink
-sudo ./deploy/install.sh --server --version 0.1.0 --domain llm.example.com
+sudo ./deploy/install.sh --server --version 0.1.1 --domain llm.example.com
 ```
 
 脚本会：下载并校验 release 二进制（SHA256）→ 安装到 `/usr/local/bin/divertlink` → 创建
@@ -96,7 +96,7 @@ sudo ./deploy/install.sh --server --version 0.1.0 --domain llm.example.com
 离线安装：
 
 ```bash
-sudo ./deploy/install.sh --server --binary ./divertlink-0.1.0-x86_64-unknown-linux-musl.tar.gz
+sudo ./deploy/install.sh --server --binary ./divertlink-0.1.1-x86_64-unknown-linux-musl.tar.gz
 ```
 
 ### 2.2 放置 TLS 证书
@@ -132,7 +132,7 @@ sudo sed -n 's/^token = "\([^"]*\)".*/\1/p' /etc/divertlink/server.toml | head -
 ```bash
 git clone https://github.com/Wrste/divertlink.git
 cd divertlink
-sudo ./deploy/install.sh --agent --version 0.1.0 \
+sudo ./deploy/install.sh --agent --version 0.1.1 \
   --gateway llm.example.com:443 \
   --token '<上一步的 token>'
 ```
@@ -846,7 +846,7 @@ sudo ./deploy/install.sh --server --version 0.2.0
 
 ```bash
 # 回滚到上一个 release（配置通常是兼容的）
-sudo ./deploy/install.sh --server --version 0.1.0
+sudo ./deploy/install.sh --server --version 0.1.1
 sudo systemctl status divertlink-server
 ```
 
@@ -873,7 +873,7 @@ DIVERTLINK_VERSION=0.2.0 docker compose -f deploy/docker-compose.yml up -d
 docker compose -f deploy/docker-compose.yml ps
 
 # 回滚
-DIVERTLINK_VERSION=0.1.0 docker compose -f deploy/docker-compose.yml up -d
+DIVERTLINK_VERSION=0.1.1 docker compose -f deploy/docker-compose.yml up -d
 ```
 
 - 证书更新后重启容器加载新证书。

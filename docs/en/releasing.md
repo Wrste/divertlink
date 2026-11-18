@@ -52,6 +52,6 @@ On failure retain the generated `.notary.json` submission metadata and inspect t
 
 [release.yml](../../.github/workflows/release.yml) supports manual build-only runs and `vX.Y.Z` tags matching `Cargo.toml`. A tag creates a **draft** with Linux/Windows assets. Hosted macOS runner builds remain unsigned workflow artifacts and are excluded from the Release so they cannot overwrite local notarized packages.
 
-Upload the locally verified DMG/tar.gz and SHA256 files to the draft, check versions/architectures and notarization, then publish. The existing [v0.1.0 release](https://github.com/Wrste/divertlink/releases/tag/v0.1.0) has Linux and notarized macOS packages; its Windows ZIP and GHCR image were not published. Installation docs must describe actual published assets rather than the workflow matrix.
+Upload the locally verified DMG/tar.gz and SHA256 files to the draft, check versions/architectures and notarization, then publish. The previous [v0.1.0 release](https://github.com/Wrste/divertlink/releases/tag/v0.1.0) had Linux and notarized macOS packages; verify the new release assets after publication. Installation docs must describe actual published assets rather than the workflow matrix.
 
 The project deployment skill can be packaged independently with `python3 scripts/package-skill.py`. Its ZIP contains only the self-contained skill and project licenses, not runtime binaries or local credentials. See [agent skill](agent-skill.md).

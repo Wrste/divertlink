@@ -22,14 +22,14 @@ rustup target add aarch64-unknown-linux-musl
 脚本生成 `dist/divertlink-<version>-<target>.tar.gz` 和 SHA256 文件。解压后直接运行：
 
 ```bash
-tar -xzf dist/divertlink-0.1.0-x86_64-unknown-linux-musl.tar.gz
-./divertlink-0.1.0-x86_64-unknown-linux-musl/divertlink version
+tar -xzf dist/divertlink-0.1.1-x86_64-unknown-linux-musl.tar.gz
+./divertlink-0.1.1-x86_64-unknown-linux-musl/divertlink version
 ```
 
 Linux 资产是 musl 静态链接，适用于常见的 glibc/musl 发行版；仍需匹配 CPU 架构。
 也可在 Mac 上安装 Zig 与 `cargo-zigbuild`，安装对应 Rust target 后用
 `--build-tool zigbuild` 交叉编译上述两个 Linux target。最终用户不需要安装构建工具。
-示例中的 `0.1.0` 替换为 Cargo.toml 对应版本。
+示例中的 `0.1.1` 替换为 Cargo.toml 对应版本。
 
 ## macOS 本机编译
 
@@ -47,9 +47,9 @@ rustup target add x86_64-apple-darwin
 压缩包内的 `divertlink` 及 `DivertLink Console.command` 可以直接运行：
 
 ```bash
-tar -xzf dist/divertlink-0.1.0-aarch64-apple-darwin.tar.gz
-./divertlink-0.1.0-aarch64-apple-darwin/divertlink version
-./divertlink-0.1.0-aarch64-apple-darwin/"DivertLink Console.command"
+tar -xzf dist/divertlink-0.1.1-aarch64-apple-darwin.tar.gz
+./divertlink-0.1.1-aarch64-apple-darwin/divertlink version
+./divertlink-0.1.1-aarch64-apple-darwin/"DivertLink Console.command"
 ```
 
 ## macOS Developer ID 签名
@@ -65,9 +65,9 @@ security find-identity -v -p codesigning
 ```bash
 export MACOS_SIGN_IDENTITY='Developer ID Application: 你的公司 (TEAMID)'
 ./scripts/release-unix.sh aarch64-apple-darwin --sign
-tar -xzf dist/divertlink-0.1.0-aarch64-apple-darwin.tar.gz
+tar -xzf dist/divertlink-0.1.1-aarch64-apple-darwin.tar.gz
 codesign --verify --strict --verbose=2 \
-  divertlink-0.1.0-aarch64-apple-darwin/divertlink
+  divertlink-0.1.1-aarch64-apple-darwin/divertlink
 ```
 
 `--sign` 使用 hardened runtime、时间戳和 Developer ID 签名。普通 tar.gz 内的二进制

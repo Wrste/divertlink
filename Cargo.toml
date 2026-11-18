@@ -1,6 +1,6 @@
 [package]
 name = "divertlink"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.88"
 description = "DivertLink - a secure, high-performance LLM reverse tunnel for exposing home-hosted models behind a fixed public IP, with a built-in cross-platform web console"

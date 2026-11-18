@@ -5,8 +5,8 @@
 Clone the complete source tree from `https://github.com/Wrste/divertlink.git` to obtain `deploy/install.sh` and `deploy/systemd/`. Select an existing release version explicitly. On each host inspect the appropriate plan:
 
 ```bash
-sudo ./deploy/install.sh --server --version 0.1.0 --domain gateway.example.com --no-start --dry-run
-sudo ./deploy/install.sh --server --version 0.1.0 --domain gateway.example.com --no-start
+sudo ./deploy/install.sh --server --version 0.1.1 --domain gateway.example.com --no-start --dry-run
+sudo ./deploy/install.sh --server --version 0.1.1 --domain gateway.example.com --no-start
 ```
 
 The script installs binary `/usr/local/bin/divertlink`, configs `/etc/divertlink`, state `/var/lib/divertlink`, user/group `divertlink` and unit templates. Existing configs are preserved unless `--force-config` is used. `--no-start` enables boot startup but skips the immediate restart. For an existing config, back it up privately before editing, and remember already running services are not stopped by this flag.
@@ -16,7 +16,7 @@ Gateway: choose public CA certificates for a public deployment, or explicitly us
 Home agent: inspect gateway tunnel token securely, then set it using a private config/management channel. The script's `--token` option is available, but avoid putting real tokens in agent tool arguments or chat; an alternative is install agent with `--no-start`, then edit `agent.toml` privately to use the gateway token. No port forwarding is required. Copy the public CA when self-signed. Set `target.url`, check, start `divertlink-agent`, and check the selected tunnel on the gateway.
 
 ```bash
-sudo ./deploy/install.sh --agent --version 0.1.0 --gateway gateway.example.com:443 --no-start
+sudo ./deploy/install.sh --agent --version 0.1.1 --gateway gateway.example.com:443 --no-start
 # Set matching tunnel token, model URL and CA/pin before starting.
 sudo /usr/local/bin/divertlink check -c /etc/divertlink/agent.toml
 sudo systemctl start divertlink-agent
@@ -28,7 +28,7 @@ The agent installer generates an independent token if none is supplied; that tok
 
 ## Manual foreground / macOS / Windows
 
-Use the skill installer for available binaries or build with current Rust stable and native C/C++ linker (`cargo build --release --locked`). Windows needs MSVC Build Tools + Windows SDK; initial v0.1.0 has no Windows ZIP. No additional runtime is needed by Unix release binaries. macOS DMG is signed, notarized and stapled; tar.gz contains the same signed executable. Do not disable Gatekeeper globally.
+Use the skill installer for available binaries or build with current Rust stable and native C/C++ linker (`cargo build --release --locked`). Windows needs MSVC Build Tools + Windows SDK; initial v0.1.1 has no Windows ZIP. No additional runtime is needed by Unix release binaries. macOS DMG is signed, notarized and stapled; tar.gz contains the same signed executable. Do not disable Gatekeeper globally.
 
 On a fresh gateway directory, use `init --role both` to obtain matching configs. Transfer only `agent.toml` and `certs/ca.crt` to the home agent; for mTLS also transfer that agent's client cert/key and adjust absolute paths. The agent never needs `server.toml`, server key or CA key. Choose the correct agent binary for its own OS/CPU.
 

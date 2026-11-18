@@ -15,7 +15,7 @@ Use the gateway's own TLS listener on 443 when free; `tunnel_listen` and `ingres
 
 ## Install and configure
 
-1. Prefer an existing verified binary, otherwise a published, pinned release from `Wrste/divertlink`. Inspect its assets; do not assume every platform was published. The initial v0.1.0 has Linux x86_64/ARM64 and signed/notarized macOS Intel/ARM64 assets; Windows ZIP availability must be checked. Use source build only when needed.
+1. Prefer an existing verified binary, otherwise a published, pinned release from `Wrste/divertlink`. Inspect its assets; do not assume every platform was published. The initial v0.1.1 has Linux x86_64/ARM64 and signed/notarized macOS Intel/ARM64 assets; Windows ZIP availability must be checked. Use source build only when needed.
 2. The helper [install_binary.py](scripts/install_binary.py) uses Python 3.9+ standard library; Python is an agent helper dependency, not a DivertLink runtime dependency. Run `--dry-run` first to inspect the target/URL/destination. A normal install downloads the checksum and archive, installs only the executable, verifies `version`, and refuses an existing destination. `--replace` is for an intended upgrade after stopping the relevant process. It never edits PATH, configuration, firewall, certificates or services. On macOS it verifies the embedded code signature. For a notarized offline container use the DMG documented in the project installation guide.
 3. Generate fresh configuration with `divertlink init`; it generates distinct random gateway API keys and agent tunnel tokens. Use a new private directory (`umask 077` on Unix). Suppress secret-bearing `init` stdout from chat/logs. Do not run `init --force` or `install.sh --force-config` over an existing deployment. Parse/edit TOML with a real parser when available; do not globally replace a token, URL or `server` string across tables. Check first, then restart only the affected service.
 4. Match gateway `[[tunnels]].id/token` to agent `[agent].id/token`. Agent `target.url` is the model service, not the gateway. With self-signed TLS copy only `ca.crt` and the relevant agent config to the agent; never copy `ca.key` or the server private key. With a public CA remove stale self-signed `ca` and `pin` settings after inspecting them. Never use `insecure=true` or `curl -k` to make a deployment pass.
@@ -25,8 +25,8 @@ Use the gateway's own TLS listener on 443 when free; `tunnel_listen` and `ingres
 Example helper usage (resolve paths relative to this installed skill):
 
 ```bash
-python3 scripts/install_binary.py --version 0.1.0 --bin-dir "$HOME/.local/bin" --dry-run
-python3 scripts/install_binary.py --version 0.1.0 --bin-dir "$HOME/.local/bin"
+python3 scripts/install_binary.py --version 0.1.1 --bin-dir "$HOME/.local/bin" --dry-run
+python3 scripts/install_binary.py --version 0.1.1 --bin-dir "$HOME/.local/bin"
 ```
 
 Use `$HOME` only as its normal home-directory value. Do not assume the binary directory is in PATH.
