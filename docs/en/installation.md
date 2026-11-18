@@ -6,7 +6,7 @@ Install on both the public gateway and home agent. The hosts may use different o
 
 ## Download availability
 
-[v0.1.1](https://github.com/Wrste/divertlink/releases/tag/v0.1.1) provides:
+[v0.1.2](https://github.com/Wrste/divertlink/releases/tag/v0.1.2) provides:
 
 | Host | Target suffix | Format |
 | --- | --- | --- |
@@ -24,7 +24,7 @@ Use Bash, `curl`, `tar` and `sha256sum`. On Debian/Ubuntu install prerequisites 
 ```bash
 (
   set -eu
-  release_version=0.1.1
+  release_version=0.1.2
   case "$(uname -m)" in
     x86_64) release_target=x86_64-unknown-linux-musl ;;
     aarch64|arm64) release_target=aarch64-unknown-linux-musl ;;
@@ -60,8 +60,8 @@ The musl executable is statically linked. It must still match the CPU and run on
 Download the matching DMG and `.dmg.sha256` from the release page. For Apple Silicon:
 
 ```bash
-shasum -a 256 -c divertlink-0.1.1-aarch64-apple-darwin.dmg.sha256
-open divertlink-0.1.1-aarch64-apple-darwin.dmg
+shasum -a 256 -c divertlink-0.1.2-aarch64-apple-darwin.dmg.sha256
+open divertlink-0.1.2-aarch64-apple-darwin.dmg
 ```
 
 The archive and checksum must be in the current directory. Double-click `DivertLink Console.command` in the mounted image to launch the UI, or run the contained executable from Terminal. Copy it to a permanent directory for continued use. The DMG is signed, notarized and stapled; it supports offline ticket validation.
@@ -71,7 +71,7 @@ For terminal installation, download and verify the tar.gz instead:
 ```bash
 (
   set -eu
-  release_version=0.1.1
+  release_version=0.1.2
   case "$(uname -m)" in
     arm64) release_target=aarch64-apple-darwin ;;
     x86_64) release_target=x86_64-apple-darwin ;;

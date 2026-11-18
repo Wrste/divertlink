@@ -41,7 +41,7 @@ This writes `dist/divertlink-deploy-skill.zip` and its `.sha256`. Extract the si
 
 ## Example requests
 
-> Use $divertlink-deploy to deploy v0.1.1 on my already authorized SSH host cloud-gateway (Linux x86_64), using gateway.example.com and systemd. Run the agent on this macOS ARM64 host against http://127.0.0.1:11434. Inspect occupied ports and preserve existing certificates. Verify the home tunnel, unauthenticated rejection and model listing; do not generate model output.
+> Use $divertlink-deploy to deploy v0.1.2 on my already authorized SSH host cloud-gateway (Linux x86_64), using gateway.example.com and systemd. Run the agent on this macOS ARM64 host against http://127.0.0.1:11434. Inspect occupied ports and preserve existing certificates. Verify the home tunnel, unauthenticated rejection and model listing; do not generate model output.
 
 > Use $divertlink-deploy with my existing nginx on 443. Keep its sites and certificates, use agent TLS on 8443 and loopback HTTP ingress, and verify proxy streaming settings.
 
@@ -55,14 +55,14 @@ Paths below are relative to the repository; after installation resolve them from
 
 ```bash
 python3 skills/divertlink-deploy/scripts/install_binary.py \
-  --version 0.1.1 --bin-dir "$HOME/.local/bin" --dry-run
+  --version 0.1.2 --bin-dir "$HOME/.local/bin" --dry-run
 python3 skills/divertlink-deploy/scripts/install_binary.py \
-  --version 0.1.1 --bin-dir "$HOME/.local/bin"
+  --version 0.1.2 --bin-dir "$HOME/.local/bin"
 ```
 
 Dry-run prints the OS/CPU, pinned URL and destination with no download/write. Installation validates the published SHA256, reads only the executable from the archive and verifies `version`; macOS also verifies its code signature. It refuses an existing binary unless `--replace` is explicitly selected for an upgrade after stopping its processes. It does not edit PATH, services, firewall, certificates or configuration. Use the notarized DMG when offline ticket validation is needed.
 
-v0.1.1 has Linux x86_64/ARM64 and macOS Intel/ARM64 packages. Windows ZIP is not published; use a [source build](installation.md#source-builds-including-windows) if the release asset is absent. Python is a helper dependency, not a runtime dependency.
+v0.1.2 has Linux x86_64/ARM64 and macOS Intel/ARM64 packages. Windows ZIP is not published; use a [source build](installation.md#source-builds-including-windows) if the release asset is absent. Python is a helper dependency, not a runtime dependency.
 
 ## End-to-end verifier
 

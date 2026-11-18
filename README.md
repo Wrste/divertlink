@@ -95,9 +95,9 @@ llama.cpp 和 new-api 接入统一公网地址。网关负责 TLS、认证、限
 | Docker | [本地构建镜像与 Compose 部署](docs/deployment.md#5-docker-部署) |
 
 下载入口：[GitHub Releases](https://github.com/Wrste/divertlink/releases)。
-[v0.1.1](https://github.com/Wrste/divertlink/releases/tag/v0.1.1) 已提供 Linux x86_64/ARM64
+[v0.1.2](https://github.com/Wrste/divertlink/releases/tag/v0.1.2) 已提供 Linux x86_64/ARM64
 和经过签名、公证的 macOS Intel/Apple Silicon 安装包，下载后即可运行。
-v0.1.1 已提供 Windows x86_64 预构建包；32 位和 Windows ARM64 暂无预构建包。
+v0.1.2 已提供 Windows x86_64 预构建包；32 位和 Windows ARM64 暂无预构建包。
 安装后运行 `divertlink version`、`divertlink --help` 验证；桌面用户可运行
 `divertlink console --open` 打开图形界面，再继续下方配置步骤。
 常见安装问题见[快速开始第 2.7 节](docs/quickstart.md#27-安装验证与常见问题)。
@@ -325,7 +325,7 @@ Windows x86_64 产物。
 
 ## 项目状态与非目标
 
-当前版本 **0.1.1（MVP）**。以下能力不在 MVP 范围（见
+当前版本 **0.1.2（MVP）**。以下能力不在 MVP 范围（见
 [DESIGN 第 9 节](docs/DESIGN.md#9-非目标mvp-不做)）：动态隧道注册/管理 Web UI、
 ACME 自动签发证书、QUIC/WebSocket 传输、跨网关联邦。
 同一隧道多 agent 负载均衡与故障转移、本地图形控制台已实现。

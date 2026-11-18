@@ -58,10 +58,10 @@
 `server`、`agent` 和 `console`，无需分别下载服务端和客户端，也无需 Node.js 或 Python。
 
 - 下载入口：[Wrste/divertlink Releases](https://github.com/Wrste/divertlink/releases)。
-- [v0.1.1](https://github.com/Wrste/divertlink/releases/tag/v0.1.1) 已提供以下 Linux/macOS
+- [v0.1.2](https://github.com/Wrste/divertlink/releases/tag/v0.1.2) 已提供以下 Linux/macOS
   安装包；Windows 包尚未发布，请先使用 [2.5 从源码安装](#25-从源码安装所有平台)。
-- 命令中的 `0.1.1` 对应本次发布，升级时在 Releases 确认新版本和资产存在。
-  下载 URL 的标签带 `v`（如 `v0.1.1`），文件名的版本不带 `v`。
+- 命令中的 `0.1.2` 对应本次发布，升级时在 Releases 确认新版本和资产存在。
+  下载 URL 的标签带 `v`（如 `v0.1.2`），文件名的版本不带 `v`。
 
 | 操作系统 / CPU | Release 资产（`<version>` 替换为实际版本） |
 | --- | --- |
@@ -85,7 +85,7 @@
 ```bash
 (
   set -eu
-  release_version="0.1.1"  # 替换为 Releases 中已有的版本
+  release_version="0.1.2"  # 替换为 Releases 中已有的版本
   case "$(uname -m)" in
     x86_64) release_target="x86_64-unknown-linux-musl" ;;
     aarch64|arm64) release_target="aarch64-unknown-linux-musl" ;;
@@ -128,7 +128,7 @@ M 系列若在 Rosetta 终端中显示 `x86_64`，建议切回原生终端安装
 ```bash
 (
   set -eu
-  release_version="0.1.1"  # 替换为 Releases 中已有的版本
+  release_version="0.1.2"  # 替换为 Releases 中已有的版本
   case "$(uname -m)" in
     arm64) release_target="aarch64-apple-darwin" ;;
     x86_64) release_target="x86_64-apple-darwin" ;;
@@ -167,7 +167,7 @@ DMG 已附加公证票据，适合离线验证；tar.gz 中为同一签名二进
 
 ### 2.4 Windows 安装发行包
 
-本次 v0.1.1 尚未附带 Windows 资产，请先按[源码安装](#25-从源码安装所有平台)构建。
+本次 v0.1.2 尚未附带 Windows 资产，请先按[源码安装](#25-从源码安装所有平台)构建。
 以下命令供 Windows 发行包发布后使用。
 
 适用于 64 位 Intel / AMD Windows。在「设置 → 系统 → 系统信息」确认系统类型，
@@ -176,7 +176,7 @@ DMG 已附加公证票据，适合离线验证；tar.gz 中为同一签名二进
 
 ```powershell
 $ErrorActionPreference = "Stop"
-$releaseVersion = "0.1.1"  # 替换为 Releases 中已有的版本
+$releaseVersion = "0.1.2"  # 替换为 Releases 中已有的版本
 $releaseName = "divertlink-$releaseVersion-x86_64-pc-windows-msvc"
 $releaseBase = "https://github.com/Wrste/divertlink/releases/download/v$releaseVersion"
 $releaseDir = Join-Path ([IO.Path]::GetTempPath()) ("divertlink-" + [guid]::NewGuid())
@@ -283,7 +283,7 @@ systemd 的环境应使用上述手工安装。需先取得完整仓库，因为
 在克隆的仓库根目录运行，可直接下载已发布的版本：
 
 ```bash
-sudo ./deploy/install.sh --server --version 0.1.1 --domain gateway.example.com
+sudo ./deploy/install.sh --server --version 0.1.2 --domain gateway.example.com
 ```
 
 若已完成上一节源码构建，也可离线安装：
@@ -300,7 +300,7 @@ sudo ./deploy/install.sh --agent --binary ./target/release/divertlink \
 ```
 
 Release 发布后，可将 `--binary ./target/release/divertlink` 换成
-`--version 0.1.1`（实际发布版本），脚本会自动选择架构、下载并校验压缩包。
+`--version 0.1.2`（实际发布版本），脚本会自动选择架构、下载并校验压缩包。
 默认二进制为 `/usr/local/bin/divertlink`，配置为 `/etc/divertlink/server.toml` 或
 `/etc/divertlink/agent.toml`。脚本会启用开机自启，默认立即启动；`--no-start` 只启用，
 暂不启动。agent 配置完成后执行：

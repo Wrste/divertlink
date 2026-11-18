@@ -14,7 +14,7 @@ DivertLink forwards HTTP semantics and streaming bodies without interpreting mod
 
 ## Install
 
-[v0.1.1](https://github.com/Wrste/divertlink/releases/tag/v0.1.1) includes directly runnable Linux and macOS binaries. Unix users do not need Rust, Python, Node.js or Docker to run the release executable.
+[v0.1.2](https://github.com/Wrste/divertlink/releases/tag/v0.1.2) includes directly runnable Linux and macOS binaries. Unix users do not need Rust, Python, Node.js or Docker to run the release executable.
 
 | Platform | Asset suffix | Notes |
 | --- | --- | --- |

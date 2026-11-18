@@ -48,7 +48,7 @@ ZIP 内只有一个 `divertlink-deploy/` 根目录，包含技能、参考资料
 
 首次部署：
 
-> 使用 $divertlink-deploy，在已授权 SSH 别名 cloud-gateway 的 Linux x86_64 服务器上部署网关，域名 gateway.example.com；本机 macOS ARM64 作 agent，模型地址 http://127.0.0.1:11434。先检查端口和现有服务，使用 v0.1.1；网关用 systemd，保留现有证书。完成后验证 home 隧道、入口鉴权和模型列表，不发起推理请求。
+> 使用 $divertlink-deploy，在已授权 SSH 别名 cloud-gateway 的 Linux x86_64 服务器上部署网关，域名 gateway.example.com；本机 macOS ARM64 作 agent，模型地址 http://127.0.0.1:11434。先检查端口和现有服务，使用 v0.1.2；网关用 systemd，保留现有证书。完成后验证 home 隧道、入口鉴权和模型列表，不发起推理请求。
 
 已有 nginx 占用 443：
 
@@ -66,15 +66,15 @@ ZIP 内只有一个 `divertlink-deploy/` 根目录，包含技能、参考资料
 
 ```bash
 python3 skills/divertlink-deploy/scripts/install_binary.py \
-  --version 0.1.1 --bin-dir "$HOME/.local/bin" --dry-run
+  --version 0.1.2 --bin-dir "$HOME/.local/bin" --dry-run
 # 确认目标平台和目录后执行安装：
 python3 skills/divertlink-deploy/scripts/install_binary.py \
-  --version 0.1.1 --bin-dir "$HOME/.local/bin"
+  --version 0.1.2 --bin-dir "$HOME/.local/bin"
 ```
 
 脚本自动识别 OS/CPU，下载固定版本及 SHA256 文件，校验归档，仅安装其中的可执行文件，并执行 `version` 检查。macOS 还执行 `codesign --verify --strict`。已有文件默认拒绝覆盖；有意升级并停止相关进程后才使用 `--replace`。它不修改 PATH、服务、防火墙或配置。离线公证票据验证应使用 [DMG 安装](quickstart.md#2-安装-divertlink)。
 
-v0.1.1 的 Linux x86_64/ARM64 和 macOS Intel/ARM64 产物将在本次 Release 构建；Windows ZIP 是否可用需以 Release 页面为准。辅助脚本会检查实际资产，缺失时应按[多平台源码安装](quickstart.md#25-从源码安装所有平台)构建。
+v0.1.2 的 Linux x86_64/ARM64 和 macOS Intel/ARM64 产物将在本次 Release 构建；Windows ZIP 是否可用需以 Release 页面为准。辅助脚本会检查实际资产，缺失时应按[多平台源码安装](quickstart.md#25-从源码安装所有平台)构建。
 
 ## 部署结果验证脚本
 
