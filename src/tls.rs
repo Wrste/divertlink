@@ -341,6 +341,14 @@ pub fn verify_peer_pin(
     }
 }
 
+/// Check that a configured SPKI pin is well formed, without a peer certificate.
+///
+/// `verify_peer_pin` requires the peer chain and reports "peer did not present a
+/// certificate" when given `None`, so it cannot be used for format-only linting.
+pub fn validate_pin(expected: &str) -> Result<()> {
+    decode_pin(expected).map(|_| ())
+}
+
 fn pin_digest(cert_der: &[u8]) -> Result<[u8; 32]> {
     let (_, cert) = x509_parser::parse_x509_certificate(cert_der)
         .map_err(|e| Error::Tls(format!("cannot parse peer certificate: {e}")))?;
@@ -868,6 +876,27 @@ mod tests {
         let mut wrong = report.server_pin.clone();
         wrong.push('A');
         assert!(verify_peer_pin(Some(&certs), &wrong).is_err());
+        assert!(verify_peer_pin(None, &report.server_pin).is_err());
+    }
+
+    #[test]
+    fn validate_pin_checks_format_without_peer_certs() {
+        let tmp = TempDir::new().unwrap();
+        let report = generate_certs(&opts(tmp.path())).unwrap();
+        // `divertlink init` writes exactly this base64url pin into agent.toml;
+        // linting it must succeed (regression: it used to warn on every start).
+        validate_pin(&report.server_pin).unwrap();
+        // The same digest in hex and `sha256/` notation is accepted too.
+        let raw = decode_pin(&report.server_pin).unwrap();
+        let hex = crate::util::hex(&raw);
+        validate_pin(&hex).unwrap();
+        validate_pin(&format!("sha256/{hex}")).unwrap();
+        // Malformed pins are still rejected.
+        assert!(validate_pin("not-a-pin").is_err());
+        assert!(validate_pin(&"aa".repeat(16)).is_err());
+        // Format validation is not verification: without a peer chain the
+        // verification entry point keeps failing, which is why lint must not
+        // call it.
         assert!(verify_peer_pin(None, &report.server_pin).is_err());
     }
 

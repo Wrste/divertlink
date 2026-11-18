@@ -1702,7 +1702,7 @@ impl AgentConfig {
             );
         }
         if let Some(pin) = &self.tls.pin {
-            if crate::tls::verify_peer_pin(None, pin).is_err() {
+            if crate::tls::validate_pin(pin).is_err() {
                 lint_push!(
                     warnings,
                     "tls.pin",
@@ -1957,6 +1957,28 @@ mod tests {
         assert!(joined.contains("DISABLED"), "{joined}");
         assert!(joined.contains("weak or a placeholder"), "{joined}");
         assert!(joined.contains("heartbeats are disabled"), "{joined}");
+    }
+
+    #[test]
+    fn agent_lint_accepts_generated_pin() {
+        let mut cfg = AgentConfig::default();
+        cfg.agent.id = "home".into();
+        cfg.agent.server = "gw.example.com:443".into();
+        cfg.agent.token = "agt_0123456789abcdef0123456789".into();
+        // Base64url SPKI digest as written by `divertlink init` / `gen-certs`.
+        cfg.tls.pin = Some("LmFMqcnB_1FtSGJSDWokYSVuKlSmem5WH3cbTjaeUzc".into());
+        let warnings = cfg.lint();
+        assert!(
+            !warnings.iter().any(|w| w.field == "tls.pin"),
+            "a valid pin must not warn: {warnings:?}"
+        );
+        // A malformed pin still warns.
+        cfg.tls.pin = Some("not-a-pin".into());
+        let warnings = cfg.lint();
+        assert!(
+            warnings.iter().any(|w| w.field == "tls.pin"),
+            "a malformed pin must warn: {warnings:?}"
+        );
     }
 
     #[test]
